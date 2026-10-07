@@ -6,17 +6,26 @@ import { copyRich } from "./client/web.ts";
 
 export default function contribute(client: PluginClientContext) {
   const buttons = new Map<string, ReturnType<typeof client.addHeaderButton>>();
+  const feedbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  const resetFeedback = (id: string) => {
+    clearTimeout(feedbackTimers.get(id));
+    feedbackTimers.delete(id);
+    buttons.get(id)?.update({ title: "Copy PR link", label: "Copy PR link", icon: "Copy" });
+  };
   let stopped = false;
   let snapshotVersion = 0;
   const changedSinceSnapshot = new Set<string>();
   let release: (() => Promise<void>) | undefined;
   const removeAll = () => {
+    for (const timer of feedbackTimers.values()) clearTimeout(timer);
+    feedbackTimers.clear();
     for (const button of buttons.values()) button.remove();
     buttons.clear();
   };
   const register = (workspace: { id: string; projectKind: string; archivingAt: string | null }) => {
     if (stopped) return;
     if (workspace.projectKind !== "git" || workspace.archivingAt) {
+      resetFeedback(workspace.id);
       buttons.get(workspace.id)?.remove();
       buttons.delete(workspace.id);
       return;
@@ -27,8 +36,14 @@ export default function contribute(client: PluginClientContext) {
       button: {
         title: "Copy PR link", label: "Copy PR link", icon: "Copy",
         behavior: { kind: "action", async onPress() {
+          resetFeedback(workspace.id);
           const link = await client.rpc(getPrLink, { workspaceId: workspace.id });
-          if (!stopped) await copyPrLink(link, copyRich, copyText);
+          if (stopped) return;
+          await copyPrLink(link, copyRich, copyText);
+          const button = buttons.get(workspace.id);
+          if (stopped || !button) return;
+          button.update({ title: "Link copied", label: "Link copied", icon: "Check" });
+          feedbackTimers.set(workspace.id, setTimeout(() => resetFeedback(workspace.id), 2200));
         } },
       },
     }));
@@ -59,7 +74,7 @@ export default function contribute(client: PluginClientContext) {
         const update = message.payload;
         changedSinceSnapshot.add(update.kind === "upsert" ? update.workspace.id : update.id);
         if (update.kind === "upsert") register(update.workspace);
-        else { buttons.get(update.id)?.remove(); buttons.delete(update.id); }
+        else { resetFeedback(update.id); buttons.get(update.id)?.remove(); buttons.delete(update.id); }
       },
       error(error) { console.error("Copy PR link workspace subscription failed", error); },
     });

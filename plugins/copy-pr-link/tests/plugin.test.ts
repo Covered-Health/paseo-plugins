@@ -57,7 +57,9 @@ test("daemon gh lookup uses workspace cwd and handles missing PR/auth/CLI", asyn
 
 test("header registration, reconnect snapshots, removal, copying, and teardown", async () => {
   const writes: string[] = [];
-  mock.module("@getpaseo/plugin/client/react-native", { namedExports: { copyText: async (text: string) => { writes.push(text); } } });
+  const feedback: any[] = [];
+  let clipboardDenied = false;
+  mock.module("@getpaseo/plugin/client/react-native", { namedExports: { copyText: async (text: string) => { if (clipboardDenied) throw new Error("Clipboard denied"); writes.push(text); } } });
   const platform = { OS: "ios" };
   mock.module("react-native", { namedExports: { Platform: platform } });
   const { default: contribute } = await import("../index.client.ts");
@@ -70,7 +72,7 @@ test("header registration, reconnect snapshots, removal, copying, and teardown",
       subscribe(callbacks: any) { observer = callbacks; },
       async release() { released++; },
     } }) } },
-    addHeaderButton(button: any) { registrations.push(button); return { remove() { removed++; } }; },
+    addHeaderButton(button: any) { registrations.push(button); return { remove() { removed++; }, update(patch: any) { feedback.push(patch); } }; },
     async rpc(_contract: unknown, input: { workspaceId: string }) { assert.equal(input.workspaceId, "git"); return link; },
   };
   const cleanup = contribute(client);
@@ -80,6 +82,11 @@ test("header registration, reconnect snapshots, removal, copying, and teardown",
   assert.equal(registrations.length, 1);
   await registrations[0].button.behavior.onPress();
   assert.deepEqual(writes, [markdownLink(link.label, link.url)]);
+  assert.deepEqual(feedback.at(-1), { title: "Link copied", label: "Link copied", icon: "Check" });
+  clipboardDenied = true;
+  await assert.rejects(registrations[0].button.behavior.onPress(), /Clipboard denied/);
+  assert.equal(feedback.at(-1).label, "Copy PR link");
+  clipboardDenied = false;
   observer.update({ type: "workspace_update", payload: { kind: "upsert", workspace } });
   assert.equal(registrations.length, 1);
   observer.snapshot({ entries: [workspace], pageInfo: { nextCursor: null } });
