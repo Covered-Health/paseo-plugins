@@ -1,0 +1,6 @@
+{
+  "id": "copy-pr-link",
+  "requirements": {
+    "paseo": ">=0.11.0-beta.2"
+  }
+}
