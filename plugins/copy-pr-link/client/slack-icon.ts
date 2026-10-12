@@ -1,21 +1,13 @@
 import { createElement } from "react";
-import { View } from "react-native";
+import { Image } from "react-native";
 import type { PluginButtonIconProps } from "@getpaseo/plugin/client";
 
-// Lucide no longer provides brand icons; draw Slack's mark with native primitives.
-export function SlackIcon({ size, color }: PluginButtonIconProps) {
-  const scale = size / 24;
-  const pieces = [
-    [5, 0, 4, 4], [0, 5, 9, 4],
-    [20, 5, 4, 4], [15, 0, 4, 9],
-    [15, 20, 4, 4], [15, 15, 9, 4],
-    [0, 15, 4, 4], [5, 15, 4, 9],
-  ];
-  return createElement(View, { style: { width: size, height: size }, pointerEvents: "none", accessible: false },
-    pieces.map(([x, y, width, height], key) => createElement(View, { key, style: {
-      position: "absolute", left: x * scale, top: y * scale,
-      width: width * scale, height: height * scale,
-      borderRadius: 2 * scale, backgroundColor: color,
-    } })),
-  );
+// Slack's favicon, embedded to work offline: https://a.slack-edge.com/9cc0056/img/icons/favicon-32.png
+const favicon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACMAAAAiCAMAAADiW5DOAAABDlBMVEUAAAD/xgD/swD/xgD/wgDgCnDrCmxIt1hDtFrjB2o+ulrkB2tEu13mBmr5wQbkBWdCuFdBtFr6vwUAsv8Asf8AtP8Asv8As/8AtP9AuFb7vwTnB23/vgMAsv//wANBtVdBtVnmBmwAs//8wQMAtP8As//jBWsAs//jB2xDtVf6wAUAsv/lBmnmBmxDt1nmB2vkB2pBt1gAtP/9wgNCt1n8wAP8wANCtlgAs/8AtP8Atf8Atv8At/8AuP9BtlhBt1hCuFlCuVlCuVpCulpDu1pDvFtEvVxEvlzjBmrkBmrkBmvlBmvnBmzoBmzqBm3rBm7tBm/8wAP9wQP/wgP/wwP/xAP/xQP/xgP/xwP/yAN1pSH6AAAAOHRSTlMACQoSFRkaICIkJSYpKS0vMjM4PD5BQkNERERLS0xNT1ZaXmJjZWZsbW9xfn6Cio2OkZaam6qutiE9PJgAAAEnSURBVDjLrdBnV8MgFAbg1733qHvvvSWNiaMOqq2WVq3+/z8i3EgCiuegx/fLvQeehAtAlqGIRcOqmSvEN51wZZSp5ID1WKXbZUIyIUAkvnYZlkSb2GUCD7PpYXDgYXT+aHIhS5NfsMzReXzVL+sIs7JkmFOq7UBkm7xhknqbPl2ab+YCOLNJoLcKurkDxmyzDOzT1rg2bXLo6cD4y6q66Y48YPbzgpcD+MesFbmMbHZl2VMrxyJLdUouzHOemC2q28CJsDIIlLW5p1oEbCLeAK5N2nwxNeBJf56aqm3qQAftrBhm0TYNcuiuR16ehGEw82JM02S+QWZ+zq8MnXHoYcSGh3n2MMJlSkRK+g3rLtNHpgeYINPsHLq18lBpUU3ve+21MVv/AMnhmxQ0lrxLAAAAAElFTkSuQmCC";
+
+export function SlackIcon({ size }: PluginButtonIconProps) {
+  return createElement(Image, {
+    source: { uri: favicon }, style: { width: size, height: size },
+    resizeMode: "contain", accessible: false,
+  });
 }

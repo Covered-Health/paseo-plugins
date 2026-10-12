@@ -77,7 +77,7 @@ test("header registration, reconnect snapshots, removal, copying, and teardown",
   const platform = { OS: "ios" };
   const opened: string[] = [];
   let navigationDenied = false;
-  mock.module("react-native", { namedExports: { Platform: platform, Text: () => null, View: () => null, Linking: { async openURL(url: string) { if (navigationDenied) throw new Error("No Slack app"); opened.push(url); } } } });
+  mock.module("react-native", { namedExports: { Platform: platform, Text: () => null, View: () => null, Image: () => null, Linking: { async openURL(url: string) { if (navigationDenied) throw new Error("No Slack app"); opened.push(url); } } } });
   mock.module("@getpaseo/plugin/client", { namedExports: { useSettings: () => { throw new Error("Settings screen is not mounted in this lifecycle test"); } } });
   mock.module("@getpaseo/plugin/client/ui", { namedExports: Object.fromEntries(["SettingsSection", "SettingsCard", "SettingsSwitch", "SettingsInput", "SettingsSelect", "SettingsAction", "ExternalLink"].map((name) => [name, () => null])) });
   const { default: contribute } = await import("../index.client.ts");
@@ -262,12 +262,14 @@ test("host-valid icons register both buttons across all workspace pages and reco
     assert.equal(live.size, 4);
     observer.update({ type: "workspace_update", payload: { kind: "upsert", workspace: workspace("new") } });
     assert.equal(live.size, 6);
-    // The custom glyph scales to the host's icon slot and uses its theme color.
+    // The real Slack favicon keeps its colors and scales to the host icon slot.
     const glyph = SlackIcon({ size: 16, color: "#abcdef" } as any);
     assert.deepEqual(glyph.props.style, { width: 16, height: 16 });
-    const pieces = glyph.props.children as any[];
-    assert.equal(pieces.length, 8);
-    assert.ok(pieces.every((piece) => piece.props.style.backgroundColor === "#abcdef"));
+    assert.equal(glyph.props.resizeMode, "contain");
+    assert.ok(!("tintColor" in (glyph.props.style as object)));
+    const source = glyph.props.source as { uri: string };
+    assert.ok(source.uri.startsWith("data:image/png;base64,"));
+    assert.equal(Buffer.from(source.uri.split(",")[1], "base64").subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
   } finally { await cleanup?.(); }
   assert.equal(live.size, 0);
 });
