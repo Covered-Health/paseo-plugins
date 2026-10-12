@@ -94,7 +94,13 @@ test("header registration, reconnect snapshots, removal, copying, and teardown",
       subscribe(callbacks: any) { observer = callbacks; },
       async release() { released++; },
     } }) } },
-    addHeaderButton(button: any) { registrations.push(button); return { remove() { removed++; }, update(patch: any) { feedback.push(patch); } }; },
+    addHeaderButton(button: any) {
+      // Paseo's bundled Lucide registry excludes brand icons, including Slack.
+      const validateIcon = (icon: unknown) => {
+        if (typeof icon === "string" && !["Copy", "Check", "Link"].includes(icon)) throw new Error(`Unknown Lucide icon: ${icon}`);
+      };
+      validateIcon(button.button.icon);
+      registrations.push(button); return { remove() { removed++; }, update(patch: any) { if (patch.icon) validateIcon(patch.icon); feedback.push(patch); } }; },
     async rpc(contract: any, input: { workspaceId: string }) {
       if (contract.name !== getPrLink.name && contract.name !== sendPrLink.name) return { status: "ready", revision: "1", values: preferences.schema.parse({ slackToken: "xoxp-test" }) };
       assert.equal(input.workspaceId, "git");
@@ -208,4 +214,60 @@ test("header registration, reconnect snapshots, removal, copying, and teardown",
   finish({ subscription: { async release() { released++; } } });
   await new Promise<void>((resolve) => setImmediate(resolve));
   assert.equal(released, 3);
+});
+
+test("host-valid icons register both buttons across all workspace pages and reconnects", async () => {
+  const { default: contribute } = await import("../index.client.ts");
+  const { SlackIcon } = await import("../client/slack-icon.ts");
+  const live = new Map<string, any>();
+  let observer: any;
+  const validate = (icon: any) => {
+    if (typeof icon === "string") assert.ok(["Copy", "Check", "Link"].includes(icon), `Unknown Lucide icon: ${icon}`);
+    else assert.equal(typeof icon, "function");
+  };
+  const workspace = (id: string) => ({ id, projectKind: "git", archivingAt: null });
+  const client: any = {
+    addSettingsScreen() { return () => {}; },
+    async rpc() { return { status: "ready", revision: "saved", values: preferences.schema.parse({ slackToken: "configured" }) }; },
+    paseo: { workspaces: { async list(options: any) {
+      if (options.page) return { entries: [workspace("paged")], pageInfo: { nextCursor: null } };
+      return { subscription: { subscribe(callbacks: any) { observer = callbacks; }, async release() {} } };
+    } } },
+    addHeaderButton({ id, workspaceId, button }: any) {
+      validate(button.icon);
+      const key = `${workspaceId}:${id}`;
+      assert.ok(!live.has(key));
+      live.set(key, button);
+      return { remove() { live.delete(key); }, update(patch: any) {
+        if (patch.icon) validate(patch.icon);
+        Object.assign(button, patch);
+      } };
+    },
+  };
+  const cleanup = contribute(client);
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    observer.snapshot({ entries: [workspace("first"), workspace("second")], pageInfo: { nextCursor: "more" } });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(live.size, 6);
+    for (const id of ["first", "second", "paged"]) {
+      assert.equal(live.get(`${id}:copy-pr-link`).icon, "Copy");
+      const slack = live.get(`${id}:send-pr-link`);
+      assert.equal(slack.icon, SlackIcon);
+      assert.equal(slack.visible, true);
+      assert.equal(slack.disabled, false);
+    }
+    observer.snapshot({ entries: [workspace("second"), workspace("first")], pageInfo: { nextCursor: null } });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(live.size, 4);
+    observer.update({ type: "workspace_update", payload: { kind: "upsert", workspace: workspace("new") } });
+    assert.equal(live.size, 6);
+    // The custom glyph scales to the host's icon slot and uses its theme color.
+    const glyph = SlackIcon({ size: 16, color: "#abcdef" } as any);
+    assert.deepEqual(glyph.props.style, { width: 16, height: 16 });
+    const pieces = glyph.props.children as any[];
+    assert.equal(pieces.length, 8);
+    assert.ok(pieces.every((piece) => piece.props.style.backgroundColor === "#abcdef"));
+  } finally { await cleanup?.(); }
+  assert.equal(live.size, 0);
 });

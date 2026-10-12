@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { Linking } from "react-native";
 import { settingsRpc } from "@getpaseo/plugin";
 import { preferences, type Preferences } from "./shared/settings.ts";
+import { SlackIcon } from "./client/slack-icon.ts";
 import { PrSettings } from "./client/settings.tsx";
 import type { PluginClientContext } from "@getpaseo/plugin/client";
 import { copyText } from "@getpaseo/plugin/client/react-native";
@@ -16,7 +17,7 @@ export default function contribute(client: PluginClientContext) {
   let settingsVersion = 0;
   const presentation = (kind: "copy" | "slack") => ({
     title: kind === "copy" ? "Copy PR link" : "Send PR link to #pull-requests",
-    label: "PR link", icon: kind === "copy" ? "Copy" : "Slack",
+    label: "PR link", icon: kind === "copy" ? "Copy" : SlackIcon,
     visible: kind === "copy" ? current.showCopy : current.showSlack,
     disabled: kind === "slack" && !current.slackToken,
   });
