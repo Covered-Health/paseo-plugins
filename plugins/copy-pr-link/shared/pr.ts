@@ -6,3 +6,11 @@ export const getPrLink = defineRpc({
   input: z.object({ workspaceId: z.string().min(1) }),
   output: z.object({ label: z.string(), url: z.string().url() }),
 });
+
+export const sendPrLink = defineRpc({
+  name: "pr.send-slack",
+  input: z.object({ workspaceId: z.string().min(1) }),
+  output: z.object({
+    channel: z.string(), ts: z.string(), navigationUrl: z.string().nullable(), navigationError: z.boolean(),
+  }),
+});

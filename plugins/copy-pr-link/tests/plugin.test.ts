@@ -1,3 +1,15 @@
+import { registerHooks } from "node:module";
+import { fileURLToPath } from "node:url";
+import { readFileSync } from "node:fs";
+import ts from "typescript";
+
+// Node strips .ts natively; use the existing compiler for the settings screen's JSX.
+registerHooks({ load(url, context, nextLoad) {
+  if (!url.endsWith(".tsx")) return nextLoad(url, context);
+  return { format: "module", shortCircuit: true, source: ts.transpileModule(readFileSync(fileURLToPath(url), "utf8"), {
+    compilerOptions: { jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext },
+  }).outputText };
+} });
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, writeFile, rm, realpath } from "node:fs/promises";
@@ -5,6 +17,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { prLink, markdownLink, htmlLink } from "../shared/link.ts";
 import { copyPrLink } from "../client/copy.ts";
+import { preferences } from "../shared/settings.ts";
+import { getPrLink, sendPrLink } from "../shared/pr.ts";
 import { lookupPr } from "../server/pr.ts";
 
 const pr = {
@@ -59,47 +73,89 @@ test("header registration, reconnect snapshots, removal, copying, and teardown",
   const writes: string[] = [];
   const feedback: any[] = [];
   let clipboardDenied = false;
-  mock.module("@getpaseo/plugin/client/react-native", { namedExports: { copyText: async (text: string) => { if (clipboardDenied) throw new Error("Clipboard denied"); writes.push(text); } } });
+  mock.module("@getpaseo/plugin/client/react-native", { namedExports: { useToast: () => ({ show() {}, error() {} }), copyText: async (text: string) => { if (clipboardDenied) throw new Error("Clipboard denied"); writes.push(text); } } });
   const platform = { OS: "ios" };
-  mock.module("react-native", { namedExports: { Platform: platform } });
+  const opened: string[] = [];
+  let navigationDenied = false;
+  mock.module("react-native", { namedExports: { Platform: platform, Text: () => null, View: () => null, Linking: { async openURL(url: string) { if (navigationDenied) throw new Error("No Slack app"); opened.push(url); } } } });
+  mock.module("@getpaseo/plugin/client", { namedExports: { useSettings: () => { throw new Error("Settings screen is not mounted in this lifecycle test"); } } });
+  mock.module("@getpaseo/plugin/client/ui", { namedExports: Object.fromEntries(["SettingsSection", "SettingsCard", "SettingsSwitch", "SettingsInput", "SettingsSelect", "SettingsAction", "ExternalLink"].map((name) => [name, () => null])) });
   const { default: contribute } = await import("../index.client.ts");
   let observer: any;
   let released = 0;
   let removed = 0;
   const registrations: any[] = [];
+  let settingsScreen: any;
+  let sent = 0;
+  let sendDenied = false;
   const client: any = {
+    addSettingsScreen(screen: any) { settingsScreen = screen; return () => {}; },
     paseo: { workspaces: { list: async () => ({ subscription: {
       subscribe(callbacks: any) { observer = callbacks; },
       async release() { released++; },
     } }) } },
     addHeaderButton(button: any) { registrations.push(button); return { remove() { removed++; }, update(patch: any) { feedback.push(patch); } }; },
-    async rpc(_contract: unknown, input: { workspaceId: string }) { assert.equal(input.workspaceId, "git"); return link; },
+    async rpc(contract: any, input: { workspaceId: string }) {
+      if (contract.name !== getPrLink.name && contract.name !== sendPrLink.name) return { status: "ready", revision: "1", values: preferences.schema.parse({ slackToken: "xoxp-test" }) };
+      assert.equal(input.workspaceId, "git");
+      if (contract.name === sendPrLink.name) {
+        if (sendDenied) throw new Error("Slack rejected the request");
+        sent++;
+        return { channel: "C123", ts: "1.000", navigationUrl: "https://example.slack.com/archives/C123/p1000", navigationError: false };
+      }
+      return link;
+    },
   };
   const cleanup = contribute(client);
   await new Promise<void>((resolve) => setImmediate(resolve));
   const workspace = { id: "git", projectKind: "git", archivingAt: null };
   observer.snapshot({ entries: [workspace, { ...workspace, id: "plain", projectKind: "non_git" }], pageInfo: { nextCursor: null } });
-  assert.equal(registrations.length, 1);
+  assert.equal(registrations.length, 2);
   await registrations[0].button.behavior.onPress();
   assert.deepEqual(writes, [markdownLink(link.label, link.url)]);
   assert.deepEqual(feedback.at(-1), { title: "Link copied", label: "Link copied", icon: "Check" });
   clipboardDenied = true;
   await assert.rejects(registrations[0].button.behavior.onPress(), /Clipboard denied/);
-  assert.equal(feedback.at(-1).label, "Copy PR link");
+  assert.equal(feedback.at(-1).label, "PR link");
   clipboardDenied = false;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  await registrations[1].button.behavior.onPress();
+  assert.equal(feedback.at(-1).label, "Link sent");
+  assert.equal(opened.length, 1);
+  navigationDenied = true;
+  await assert.rejects(registrations[1].button.behavior.onPress(), /Link sent, but Slack could not be opened/);
+  assert.equal(feedback.at(-1).label, "Link sent");
+  assert.equal(sent, 2);
+  sendDenied = true;
+  await assert.rejects(registrations[1].button.behavior.onPress(), /Slack rejected/);
+  assert.equal(feedback.at(-1).label, "PR link");
+  sendDenied = false;
+  navigationDenied = false;
+  const settingsProps = settingsScreen.Component({}).props;
+  settingsProps.onChange(preferences.schema.parse({ showCopy: false, showSlack: true }));
+  assert.equal(feedback.at(-2).visible, false);
+  assert.equal(feedback.at(-1).visible, true);
+  settingsProps.onChange(preferences.schema.parse({ showCopy: true, showSlack: false }));
+  assert.equal(feedback.at(-2).visible, true);
+  assert.equal(feedback.at(-1).visible, false);
+  settingsProps.onChange(preferences.schema.parse({ showCopy: false, showSlack: false }));
+  assert.equal(feedback.at(-1).visible, false);
+  settingsProps.onChange(preferences.schema.parse({ showCopy: true, showSlack: true }));
+  assert.equal(feedback.at(-1).visible, true);
+  assert.equal(feedback.at(-1).disabled, true);
   observer.update({ type: "workspace_update", payload: { kind: "upsert", workspace } });
-  assert.equal(registrations.length, 1);
-  observer.snapshot({ entries: [workspace], pageInfo: { nextCursor: null } });
-  assert.equal(removed, 1);
   assert.equal(registrations.length, 2);
-  observer.update({ type: "workspace_update", payload: { kind: "remove", id: "git" } });
+  observer.snapshot({ entries: [workspace], pageInfo: { nextCursor: null } });
   assert.equal(removed, 2);
+  assert.equal(registrations.length, 4);
+  observer.update({ type: "workspace_update", payload: { kind: "remove", id: "git" } });
+  assert.equal(removed, 4);
   observer.update({ type: "workspace_update", payload: { kind: "upsert", workspace } });
   await cleanup?.();
-  assert.equal(removed, 3);
+  assert.equal(removed, 6);
   assert.equal(released, 1);
   observer.update({ type: "workspace_update", payload: { kind: "upsert", workspace } });
-  assert.equal(registrations.length, 3);
+  assert.equal(registrations.length, 6);
 
   const originalList = client.paseo.workspaces.list;
   client.paseo.workspaces.list = async (options: any) => options.page
