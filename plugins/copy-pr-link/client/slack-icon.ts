@@ -7,7 +7,7 @@ const favicon = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACMAAAAiCAMAAADiW
 
 export function SlackIcon({ size }: PluginButtonIconProps) {
   return createElement(Image, {
-    source: { uri: favicon }, style: { width: size, height: size },
+    source: { uri: favicon }, style: { width: size * 0.75, height: size * 0.75, margin: size / 8 },
     resizeMode: "contain", accessible: false,
   });
 }

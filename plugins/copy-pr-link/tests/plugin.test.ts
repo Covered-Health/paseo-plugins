@@ -264,7 +264,7 @@ test("host-valid icons register both buttons across all workspace pages and reco
     assert.equal(live.size, 6);
     // The real Slack favicon keeps its colors and scales to the host icon slot.
     const glyph = SlackIcon({ size: 16, color: "#abcdef" } as any);
-    assert.deepEqual(glyph.props.style, { width: 16, height: 16 });
+    assert.deepEqual(glyph.props.style, { width: 12, height: 12, margin: 2 });
     assert.equal(glyph.props.resizeMode, "contain");
     assert.ok(!("tintColor" in (glyph.props.style as object)));
     const source = glyph.props.source as { uri: string };
