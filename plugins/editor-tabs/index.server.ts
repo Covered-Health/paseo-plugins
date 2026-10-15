@@ -9,10 +9,10 @@ export default function contribute(server: PluginServerContext) {
     if (!workspace) throw new Error('Workspace is unavailable.');
     return languages.lookup(workspace.workspaceDirectory, editorId, path, buffers, position, kind);
   });
-  server.handle(inspect, async ({ workspaceId, editorId, path, buffers, position }, { paseo }) => {
+  server.handle(inspect, async ({ workspaceId, editorId, path, buffers, position, kind }, { paseo }) => {
     const workspace = await paseo.workspaces.ref(workspaceId).refresh();
     if (!workspace) throw new Error('Workspace is unavailable.');
-    return languages.inspect(workspace.workspaceDirectory, editorId, path, buffers, position);
+    return languages.inspect(workspace.workspaceDirectory, editorId, path, buffers, position, kind);
   });
   server.handle(release, async ({ workspaceId, editorId }, { paseo }) => {
     const workspace = await paseo.workspaces.ref(workspaceId).refresh();

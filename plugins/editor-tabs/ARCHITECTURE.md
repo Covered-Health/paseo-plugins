@@ -35,6 +35,8 @@ The probe and its logging RPC were removed afterwards. Production code contains 
 
 The bridge handles `publishDiagnostics` (filtering explicit stale document versions) and pull diagnostics when advertised. A server that omits diagnostic versions cannot provide the same stale-report guarantee. Invalid reports are discarded. CSS Custom Highlights draw wavy error/warning underlines without injecting foreign CodeMirror state fields or changing native text/history. Mouseovers use text-only tooltips; no server-provided HTML is executed. Missing workspace config and uncovered extensions do not produce repeated background toasts. Cleanup removes highlights/tooltips/listeners and releases processes. Closed files are not proactively analyzed.
 
+Hover uses `textDocument/hover` after a 250 ms pointer pause and checks the advertised capability. LSP MarkedString/MarkupContent forms become bounded text-only content; code fences are removed for display. Pointer movement, scrolling, keystrokes, buffer changes and disposal invalidate outstanding responses. Diagnostic messages take precedence when hovering over a squiggle.
+
 ## Alternatives revisited
 
 | Approach | Outcome |

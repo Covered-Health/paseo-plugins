@@ -15,6 +15,7 @@ export class Intelligence {
   private stopped = false;
   private hoverTimer?: ReturnType<typeof setTimeout>;
   private frame = 0;
+  private hoverRequest = 0;
   private lastError = '';
   private workspaces = new Set<string>();
   private timer: ReturnType<typeof setInterval>;
@@ -35,7 +36,7 @@ export class Intelligence {
     this.style.textContent = [1, 2, 3, 4].map(severity => `::highlight(${this.id}-${severity}) { text-decoration: underline wavy ${severity === 1 ? '#ed6666' : severity === 2 ? '#d6a642' : colors.accent}; text-underline-offset: 3px; }`).join('\n');
     this.tooltip.style.cssText = `display:none;position:fixed;z-index:100000;max-width:min(600px,calc(100vw - 16px));max-height:40vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:8px;border:1px solid ${colors.border};border-radius:4px;background:${colors.surface0};color:${colors.foreground};font:13px/1.5 system-ui;box-shadow:0 2px 10px #0004`;
   }
-  private hide() { clearTimeout(this.hoverTimer); this.tooltip.style.display = 'none'; }
+  private hide() { this.hoverRequest++; clearTimeout(this.hoverTimer); this.tooltip.style.display = 'none'; }
   private key = () => this.hide();
   private scroll = () => { this.hide(); this.paint(); };
   private mouse = (event: MouseEvent) => {
@@ -47,13 +48,27 @@ export class Intelligence {
     const offset = binding.view.posAtCoords({ x: event.clientX, y: event.clientY });
     if (offset === null) return;
     const items = record.diagnostics.filter(item => { try { return positionOffset(record.doc.toString(), item.range.start) <= offset && positionOffset(record.doc.toString(), item.range.end) >= offset; } catch { return false; } });
-    if (items.length) this.hoverTimer = setTimeout(() => {
-      this.tooltip.textContent = items.map(item => `${item.severity === 1 ? 'Error' : item.severity === 2 ? 'Warning' : 'Info'}${item.source ? ` (${item.source}${item.code !== undefined ? ` ${item.code}` : ''})` : ''}: ${item.message}`).join('\n\n');
-      this.tooltip.style.display = 'block';
-      this.tooltip.style.left = `${Math.max(8, Math.min(event.clientX, innerWidth - this.tooltip.offsetWidth - 8))}px`;
-      this.tooltip.style.top = `${Math.max(8, Math.min(event.clientY + 18, innerHeight - this.tooltip.offsetHeight - 8))}px`;
+    const request = this.hoverRequest;
+    const doc = binding.view.state.doc;
+    this.hoverTimer = setTimeout(() => {
+      if (items.length) this.showTooltip(items.map(item => `${item.severity === 1 ? 'Error' : item.severity === 2 ? 'Warning' : 'Info'}${item.source ? ` (${item.source}${item.code !== undefined ? ` ${item.code}` : ''})` : ''}: ${item.message}`).join('\n\n'), event.clientX, event.clientY);
+      else void this.hover(binding, offset, doc, request, event.clientX, event.clientY);
     }, 250);
   };
+  private showTooltip(text: string, x: number, y: number) {
+    this.tooltip.textContent = text; this.tooltip.style.display = 'block';
+    this.tooltip.style.left = `${Math.max(8, Math.min(x, innerWidth - this.tooltip.offsetWidth - 8))}px`;
+    this.tooltip.style.top = `${Math.max(8, Math.min(y + 18, innerHeight - this.tooltip.offsetHeight - 8))}px`;
+  }
+  private async hover(binding: Binding, offset: number, doc: EditorView['state']['doc'], request: number, x: number, y: number) {
+    const siblings = nativeEditors(this.hostId, binding.pane.workspaceId), docs = siblings.map(item => item.view.state.doc);
+    try {
+      const line = doc.lineAt(offset);
+      const response = await this.api.inspect({ kind: 'hover', workspaceId: binding.pane.workspaceId, editorId: this.editorId, path: binding.path, buffers: editorBuffers(binding, siblings), position: { line: line.number - 1, character: offset - line.from } });
+      if (this.stopped || request !== this.hoverRequest || binding.view.state.doc !== doc || siblings.some((item, index) => item.view.state.doc !== docs[index])) return;
+      if (response.hover) this.showTooltip(response.hover, x, y);
+    } catch { /* Background mouseovers must not interrupt editing or produce repeated error toasts. */ }
+  }
   private tick() {
     if (this.stopped || document.hidden) return;
     const bindings = nativeEditors(this.hostId);
@@ -78,7 +93,7 @@ export class Intelligence {
     record.pending = true; record.checked = Date.now();
     try {
       this.workspaces.add(binding.pane.workspaceId);
-      const response = await this.api.inspect({ workspaceId: binding.pane.workspaceId, editorId: this.editorId, path: binding.path, buffers: editorBuffers(binding, siblings), position: { line: 0, character: 0 } });
+      const response = await this.api.inspect({ kind: 'diagnostics', workspaceId: binding.pane.workspaceId, editorId: this.editorId, path: binding.path, buffers: editorBuffers(binding, siblings), position: { line: 0, character: 0 } });
       if (this.stopped || doc !== binding.view.state.doc || siblings.some((item, index) => item.view.state.doc !== docs[index])) return;
       record.diagnostics = response.diagnostics; this.paint(); this.lastError = '';
     } catch (error) {

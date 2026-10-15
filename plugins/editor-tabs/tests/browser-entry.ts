@@ -132,6 +132,24 @@ async function runChecks() {
   checks.push('cleanup removes injected listeners');
   return checks;
 }
+async function hoverChecks() {
+  const binding = nativeEditors(hostId).find(item => item.path.endsWith('usage.py'))!;
+  const original = binding.view.state.sliceDoc();
+  const intelligence = new Intelligence(api, hostId, 'hover-browser-proof', { surface0: '#17191e', foreground: '#e7e9ee', border: '#454b59', accent: '#8eb5ff' }, () => {});
+  const until = async (check: () => boolean, detail: string) => { const end = Date.now() + 15_000; while (!check()) { if (Date.now() > end) throw new Error(detail); await new Promise(resolve => setTimeout(resolve, 50)); } };
+  try {
+    binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: 'value: int = 1\n' } });
+    await new Promise(resolve => setTimeout(resolve, 750));
+    const coords = binding.view.coordsAtPos(2)!;
+    binding.view.contentDOM.dispatchEvent(new MouseEvent('mousemove', { clientX: coords.left, clientY: (coords.top + coords.bottom) / 2, bubbles: true }));
+    await until(() => !!document.querySelector('[data-lsp-tooltip]')?.textContent?.includes('value'), 'No Python type hover');
+    const tooltip = document.querySelector<HTMLElement>('[data-lsp-tooltip]')!;
+    if (tooltip.querySelector('script, iframe, img')) throw new Error('Hover rendered server HTML');
+    binding.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    if (tooltip.style.display !== 'none') throw new Error('Escape did not dismiss hover');
+    return ['Python hover shows type information', 'hover uses text-only content', 'Escape dismisses hover'];
+  } finally { await intelligence.dispose(); binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: original } }); }
+}
 async function diagnosticsChecks() {
   const until = async (check: () => boolean, detail: string) => { const end = Date.now() + 15_000; while (!check()) { if (Date.now() > end) throw new Error(detail); await new Promise(resolve => setTimeout(resolve, 50)); } };
   let current = nativeEditors(hostId).find(binding => binding.path.endsWith('usage.py'));
@@ -161,4 +179,4 @@ async function diagnosticsChecks() {
     await intelligence.dispose(); binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: original } });
   }
 }
-Object.assign(window, { proof: { runChecks, diagnosticsChecks, dispose: async () => { await adapter.dispose(); root.unmount(); } } });
+Object.assign(window, { proof: { runChecks, diagnosticsChecks, hoverChecks, dispose: async () => { await adapter.dispose(); root.unmount(); } } });

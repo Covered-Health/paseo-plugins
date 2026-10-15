@@ -26,6 +26,8 @@ for (const extension of ['py', 'ts']) test(`${extension} diagnostics follow unsa
       await new Promise(resolve => setTimeout(resolve, 100));
     } while (Date.now() < deadline);
     assert.ok(response.diagnostics.some(item => item.severity === 1 && item.range.start.line === 0), JSON.stringify(response));
+    const hover = await languages.inspect(root, 'diagnostics', path, buffers, { line: 0, character: python ? 2 : 8 }, 'hover');
+    assert.ok(hover.hover?.includes(python ? 'value' : 'number'), JSON.stringify(hover));
     buffers[0].text = python ? 'value: int = 1\n' : 'const value: number = 1;\n';
     assert.equal((await inspect()).diagnostics.length, 0, 'Kept diagnostics for an older document version');
     await new Promise(resolve => setTimeout(resolve, 300));
