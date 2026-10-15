@@ -1,0 +1,36 @@
+{
+  "servers": {
+    "typescript": {
+      "command": "typescript-language-server",
+      "args": [
+        "--stdio"
+      ],
+      "languages": {
+        "ts": "typescript",
+        "tsx": "typescriptreact",
+        "mts": "typescript",
+        "cts": "typescript",
+        "js": "javascript",
+        "jsx": "javascriptreact",
+        "mjs": "javascript",
+        "cjs": "javascript"
+      },
+      "initializationOptions": {
+        "tsserver": {
+          "useSyntaxServer": "never"
+        },
+        "disableAutomaticTypingAcquisition": true
+      }
+    },
+    "python": {
+      "command": "basedpyright-langserver",
+      "args": [
+        "--stdio"
+      ],
+      "languages": {
+        "py": "python",
+        "pyi": "python"
+      }
+    }
+  }
+}
