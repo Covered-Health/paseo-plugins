@@ -55,6 +55,8 @@ paseo plugin install github:covered-health/paseo-plugins:plugins/editor-tabs
 
 Configure servers in **`.paseo/lsp.json` in each workspace**, rather than the plugin UI. Each profile maps extensions to language IDs and may specify a directory `path`; omitted paths cover the workspace root. The deepest matching scope wins, and its directory becomes the server's CWD and LSP root. Saved config changes take effect on the next navigation lookup and restart that workspace's sessions. See [config examples and rules](plugins/editor-tabs/OVERVIEW.md).
 
+Open file editors also receive LSP error/warning squiggles with mouseover messages, including unsaved edits. Buffers sync after a short typing pause, and diagnostics refresh about once per second. Highlights use the browser's CSS Highlight API and preserve Paseo's editing/undo behavior; browsers without that API cannot display squiggles. Python and TypeScript diagnostics are tested. Closed/unmounted files are not checked proactively.
+
 The npm tools are needed only for JavaScript/TypeScript. A Python profile can instead use `command: "ty"`, `args: ["server"]` and `languages: {"py":"python","pyi":"python"}`. basedpyright is tested; ty is not yet verified.
 
 This uses private React pane context because Paseo has no supported editor-extension API. It was proven in the live macOS Paseo 0.11.2 app, including native Python definition tabs, exact symbol selection and usages. A Paseo update may require adapting the private bridge. The plugin remains installed as `editor-tabs`; it no longer contributes replacement tabs. See [architecture and proof](plugins/editor-tabs/ARCHITECTURE.md) and [setup and limits](plugins/editor-tabs/OVERVIEW.md).

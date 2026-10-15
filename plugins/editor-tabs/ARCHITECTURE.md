@@ -29,6 +29,12 @@ The probe and its logging RPC were removed afterwards. Production code contains 
 - The adapter calls the pane’s native `openFileInWorkspace` with the target and line range. It waits for the destination editor, then dispatches a plain selection transaction and focuses it. Existing native file-opening paths continue to work unchanged.
 - Pane lookup checks private shapes at runtime. Unknown editors/hosts are not intercepted. Disposal removes DOM listeners and workspace results, cancels pending destination waits and releases language sessions. Request deadlines, idle eviction and plugin shutdown terminate server processes; POSIX process groups include children.
 
+## Diagnostics
+
+`client/intelligence.ts` observes mounted native editors every 250 ms, debounces changed documents for 350 ms and refreshes diagnostics at most once per second per visible pane. Each scope keeps its own persistent session; background intelligence uses a separate editor ID from explicit navigation so closing a navigation surface cannot race its overlays. All sibling buffers are synchronized, and a response is discarded if any supplied buffer changed while it was running. DOM ranges are rebuilt after viewport DOM changes/scrolls, and diagnostics are cleared immediately on document changes.
+
+The bridge handles `publishDiagnostics` (filtering explicit stale document versions) and pull diagnostics when advertised. A server that omits diagnostic versions cannot provide the same stale-report guarantee. Invalid reports are discarded. CSS Custom Highlights draw wavy error/warning underlines without injecting foreign CodeMirror state fields or changing native text/history. Mouseovers use text-only tooltips; no server-provided HTML is executed. Missing workspace config and uncovered extensions do not produce repeated background toasts. Cleanup removes highlights/tooltips/listeners and releases processes. Closed files are not proactively analyzed.
+
 ## Alternatives revisited
 
 | Approach | Outcome |

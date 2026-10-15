@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { NativeNavigation, nativeEditors } from '../client/native.ts';
+import { Intelligence } from '../client/intelligence.ts';
 import { getResults, subscribeResults } from '../client/results.ts';
 import type { EditorApi } from '../shared/contracts.ts';
 
@@ -14,6 +15,7 @@ let nextResponse: Awaited<ReturnType<EditorApi['lookup']>> | Error | undefined;
 const openedPanels: string[] = [];
 const notices: { message: string; error?: boolean }[] = [];
 const api: EditorApi = {
+  inspect: input => call('inspect', input),
   lookup: input => {
     const response = nextResponse; nextResponse = undefined;
     return response instanceof Error ? Promise.reject(response) : response ? Promise.resolve(response) : call('lookup', input);
@@ -130,4 +132,33 @@ async function runChecks() {
   checks.push('cleanup removes injected listeners');
   return checks;
 }
-Object.assign(window, { proof: { runChecks, dispose: async () => { await adapter.dispose(); root.unmount(); } } });
+async function diagnosticsChecks() {
+  const until = async (check: () => boolean, detail: string) => { const end = Date.now() + 15_000; while (!check()) { if (Date.now() > end) throw new Error(detail); await new Promise(resolve => setTimeout(resolve, 50)); } };
+  let current = nativeEditors(hostId).find(binding => binding.path.endsWith('usage.py'));
+  await until(() => !!(current = nativeEditors(hostId).find(binding => binding.path.endsWith('usage.py'))), 'Missing Python editor');
+  const binding = current!;
+  const original = binding.view.state.sliceDoc();
+  const errors: string[] = [];
+  const intelligence = new Intelligence(api, hostId, 'diagnostics-browser-proof', { surface0: '#17191e', foreground: '#e7e9ee', border: '#454b59', accent: '#8eb5ff' }, message => errors.push(message));
+  const highlights = () => [...CSS.highlights.entries()].filter(([name]) => name.startsWith('paseo-lsp-'));
+  const count = () => highlights().reduce((sum, [, highlight]) => sum + highlight.size, 0);
+  try {
+    binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: 'value: int = "wrong"\n' } });
+    await until(() => count() > 0, 'No squiggle for unsaved Python type error: ' + errors.join(';'));
+    const line = binding.view.state.doc.line(1);
+    const coords = binding.view.coordsAtPos(line.to - 3)!;
+    binding.view.contentDOM.dispatchEvent(new MouseEvent('mousemove', { clientX: coords.left, clientY: (coords.top + coords.bottom) / 2, bubbles: true }));
+    await until(() => !!document.querySelector<HTMLElement>('[data-lsp-tooltip]')?.textContent?.includes('Error'), 'Missing diagnostic mouseover');
+    const tooltip = document.querySelector<HTMLElement>('[data-lsp-tooltip]')!;
+    if (tooltip.style.display === 'none') throw new Error('Diagnostic tooltip hidden');
+    binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: 'value: int = 1\n' } });
+    await until(() => count() === 0, 'Old squiggle survived correction');
+    if (binding.view.state.sliceDoc() !== 'value: int = 1\n') throw new Error('Highlights modified native text');
+    await intelligence.dispose();
+    if (highlights().length || document.querySelector('[data-lsp-tooltip]')) throw new Error('Diagnostic UI survived cleanup');
+    return ['unsaved Python diagnostics render squiggles', 'diagnostic mouseover', 'correction clears stale diagnostics', 'highlights preserve native text', 'diagnostic cleanup'];
+  } finally {
+    await intelligence.dispose(); binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: original } });
+  }
+}
+Object.assign(window, { proof: { runChecks, diagnosticsChecks, dispose: async () => { await adapter.dispose(); root.unmount(); } } });

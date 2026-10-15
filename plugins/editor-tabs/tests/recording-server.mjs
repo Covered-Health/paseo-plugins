@@ -8,9 +8,12 @@ const documents = new Set();
 connection.onRequest('initialize', params => {
   options = params.initializationOptions;
   record({ event: 'initialize', cwd: process.cwd(), params });
-  return { capabilities: { definitionProvider: true, referencesProvider: true } };
+  return { capabilities: { definitionProvider: true, referencesProvider: true, ...(options?.pull ? { diagnosticProvider: {} } : {}) } };
 });
-connection.onNotification('textDocument/didOpen', params => documents.add(params.textDocument.uri));
+const publish = params => connection.sendNotification('textDocument/publishDiagnostics', { uri: params.textDocument.uri, version: params.textDocument.version + (options?.versionOffset ?? 0), diagnostics: options?.diagnostics ?? [] });
+connection.onNotification('textDocument/didOpen', params => { documents.add(params.textDocument.uri); if (!options?.pull) publish(params); });
+connection.onNotification('textDocument/didChange', params => { if (!options?.pull) publish(params); });
+connection.onRequest('textDocument/diagnostic', () => ({ kind: 'full', items: options?.diagnostics ?? [] }));
 connection.onNotification('textDocument/didClose', params => documents.delete(params.textDocument.uri));
 connection.onRequest('textDocument/definition', params => {
   record({ event: 'query', documents: [...documents] });

@@ -4,13 +4,13 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { setTimeout, clearTimeout, setInterval, clearInterval } from 'node:timers';
 import { createMessageConnection, StreamMessageReader, StreamMessageWriter, ResponseError, ErrorCodes } from 'vscode-jsonrpc/node';
 import { z } from 'zod';
-import { buffer, point, range, type Target, positionOffset } from '../shared/contracts.ts';
+import { buffer, point, range, type Target, positionOffset, diagnostic, type Inspection } from '../shared/contracts.ts';
 import { readConfig, selectServer, CONFIG_FILE, type ScopedServer } from './config.ts';
 import { extname } from 'node:path';
 import { contained, checkedText } from './files.ts';
 
 const provider = z.union([z.boolean(), z.record(z.string(), z.unknown())]);
-const initialization = z.object({ capabilities: z.object({ positionEncoding: z.string().optional(), definitionProvider: provider.optional(), referencesProvider: provider.optional() }) });
+const initialization = z.object({ capabilities: z.object({ positionEncoding: z.string().optional(), definitionProvider: provider.optional(), referencesProvider: provider.optional(), diagnosticProvider: provider.optional() }) });
 const location = z.object({ uri: z.string(), range });
 const link = z.object({ targetUri: z.string(), targetRange: range, targetSelectionRange: range });
 const locations = z.union([z.null(), location, z.array(z.union([location, link]))]);
@@ -41,6 +41,7 @@ class Session {
   connection: ReturnType<typeof createMessageConnection>;
   ready: Promise<z.output<typeof initialization>['capabilities']>;
   lastUsed = Date.now();
+  private diagnostics = new Map<string, { version?: number; items: Inspection["diagnostics"] }>();
   private documents = new Map<string, { text: string; version: number }>();
   private queue: Promise<unknown> = Promise.resolve();
   private failure: Promise<never>;
@@ -61,9 +62,14 @@ class Session {
     this.child.once('exit', (code, signal) => fail(`Language server exited (${code ?? signal}).`));
     this.connection.onClose(() => fail('Language server connection closed.'));
     this.connection.onError(([error]) => fail(error.message));
+    this.connection.onNotification('textDocument/publishDiagnostics', (params: unknown) => {
+      const report = z.object({ uri: z.string(), version: z.number().int().optional(), diagnostics: z.array(diagnostic).max(1000) }).safeParse(params);
+      if (report.success && this.documents.has(report.data.uri)) this.diagnostics.set(report.data.uri, { version: report.data.version, items: report.data.diagnostics });
+    });
     this.connection.onRequest((method, params: unknown) => {
       if (method === 'workspace/configuration') return z.object({ items: z.array(z.unknown()) }).parse(params).items.map(() => null);
       if (method === 'workspace/workspaceFolders') return [{ uri: pathToFileURL(root).href, name: root }];
+      if (method === 'workspace/diagnostic/refresh') return null;
       if (method === 'window/workDoneProgress/create') return null;
       if (method === 'workspace/applyEdit') return { applied: false, failureReason: 'Language-server edits are not applied by this editor.' };
       throw new ResponseError(ErrorCodes.MethodNotFound, `Unsupported client request: ${method}`);
@@ -74,7 +80,7 @@ class Session {
       const response = initialization.parse(await connection.sendRequest('initialize', {
         processId: process.pid, rootUri: pathToFileURL(root).href,
         workspaceFolders: [{ uri: pathToFileURL(root).href, name: root }],
-        capabilities: { general: { positionEncodings: ['utf-16'] }, workspace: { configuration: true, workspaceFolders: true }, window: { workDoneProgress: true }, textDocument: { definition: { linkSupport: true }, references: {} } },
+        capabilities: { general: { positionEncodings: ['utf-16'] }, workspace: { configuration: true, workspaceFolders: true }, window: { workDoneProgress: true }, textDocument: { definition: { linkSupport: true }, references: {}, publishDiagnostics: { versionSupport: true }, diagnostic: { dynamicRegistration: false } } },
         initializationOptions: config.initializationOptions,
       }));
       if (response.capabilities.positionEncoding && response.capabilities.positionEncoding !== 'utf-16') throw new Error('Language server selected an unsupported position encoding. UTF-16 is required.');
@@ -83,7 +89,7 @@ class Session {
     })();
     void this.ready.catch(() => {});
   }
-  query(files: { absolute: string; text: string; languageId: string }[], absolute: string, position: z.output<typeof point>, kind: 'definition' | 'references', timeoutMs: number) {
+  query(files: { absolute: string; text: string; languageId: string }[], absolute: string, position: z.output<typeof point>, kind: 'definition' | 'references' | 'diagnostics', timeoutMs: number) {
     const work = this.queue.catch(() => {}).then(async () => {
       if (this.closing) throw new Error('Language server session closed. Retry navigation.');
       this.lastUsed = Date.now();
@@ -92,11 +98,11 @@ class Session {
       try {
         return await Promise.race([this.failure, timeout, (async () => {
           const capabilities = await this.ready;
-          if (!(kind === 'definition' ? capabilities.definitionProvider : capabilities.referencesProvider)) throw new Error(`Language server does not support ${kind}.`);
+          if (kind !== 'diagnostics' && !(kind === 'definition' ? capabilities.definitionProvider : capabilities.referencesProvider)) throw new Error(`Language server does not support ${kind}.`);
           const uris = new Set(files.map(file => pathToFileURL(file.absolute).href));
           for (const uri of this.documents.keys()) if (!uris.has(uri)) {
             await this.connection.sendNotification('textDocument/didClose', { textDocument: { uri } });
-            this.documents.delete(uri);
+            this.documents.delete(uri); this.diagnostics.delete(uri);
           }
           for (const file of files) {
             const uri = pathToFileURL(file.absolute).href;
@@ -105,9 +111,20 @@ class Session {
               await this.connection.sendNotification('textDocument/didOpen', { textDocument: { uri, languageId: file.languageId, version: 1, text: file.text } });
               this.documents.set(uri, { text: file.text, version: 1 });
             } else if (old.text !== file.text) {
+              this.diagnostics.delete(uri);
               await this.connection.sendNotification('textDocument/didChange', { textDocument: { uri, version: old.version + 1 }, contentChanges: [{ text: file.text }] });
               this.documents.set(uri, { text: file.text, version: old.version + 1 });
             }
+          }
+          if (kind === 'diagnostics') {
+            const uri = pathToFileURL(absolute).href;
+            if (capabilities.diagnosticProvider) {
+              const report = z.discriminatedUnion('kind', [z.object({ kind: z.literal('full'), items: z.array(diagnostic).max(1000) }), z.object({ kind: z.literal('unchanged') })]).parse(await this.connection.sendRequest('textDocument/diagnostic', { textDocument: { uri } }));
+              if (report.kind === 'full') this.diagnostics.set(uri, { version: this.documents.get(uri)?.version, items: report.items });
+            }
+            const report = this.diagnostics.get(uri);
+            const current = this.documents.get(uri);
+            return { diagnostics: report && (report.version === undefined || report.version === current?.version) ? report.items : [] };
           }
           const result = await this.connection.sendRequest(kind === 'definition' ? 'textDocument/definition' : 'textDocument/references', { textDocument: { uri: pathToFileURL(absolute).href }, position, ...(kind === 'references' ? { context: { includeDeclaration: false } } : {}) });
           return await targets(this.root, result);
@@ -145,7 +162,13 @@ export class Languages {
   private sweep = setInterval(() => {
     for (const [key, session] of this.sessions) if (Date.now() - session.lastUsed > 5 * 60_000) { this.sessions.delete(key); void session.dispose().catch(console.error); }
   }, 30_000);
-  async lookup(root: string, editorId: string, path: string, buffers: z.output<typeof buffer>[], position: z.output<typeof point>, kind: 'definition' | 'references', timeoutMs = 30_000): Promise<{ targets: Target[]; omitted: number }> {
+  async lookup(root: string, editorId: string, path: string, buffers: z.output<typeof buffer>[], position: z.output<typeof point>, kind: 'definition' | 'references', timeoutMs = 30_000) {
+    return await this.request(root, editorId, path, buffers, position, kind, timeoutMs) as { targets: Target[]; omitted: number };
+  }
+  async inspect(root: string, editorId: string, path: string, buffers: z.output<typeof buffer>[], position: z.output<typeof point>) {
+    return await this.request(root, editorId, path, buffers, position, 'diagnostics', 30_000) as Inspection;
+  }
+  private async request(root: string, editorId: string, path: string, buffers: z.output<typeof buffer>[], position: z.output<typeof point>, kind: 'definition' | 'references' | 'diagnostics', timeoutMs: number): Promise<{ targets: Target[]; omitted: number } | Inspection> {
     if (this.stopped) throw new Error('Editor plugin stopped.');
     root = await realpath(root);
     let servers: ScopedServer[];
@@ -171,7 +194,7 @@ export class Languages {
     positionOffset(active.text, position);
     if (this.stopped) throw new Error('Editor plugin stopped.');
     // Another lookup can reload config while buffer paths are being resolved.
-    if (this.configs.get(root) !== JSON.stringify(servers)) return this.lookup(root, editorId, path, buffers, position, kind, timeoutMs);
+    if (this.configs.get(root) !== JSON.stringify(servers)) return this.request(root, editorId, path, buffers, position, kind, timeoutMs);
     const key = JSON.stringify([root, editorId, config]);
     let session = this.sessions.get(key);
     if (!session) {

@@ -10,9 +10,15 @@ export const range = z.object({ start: point, end: point });
 export const target = z.object({ path: z.string(), range });
 export type Target = z.output<typeof target>;
 export const buffer = z.object({ path, text: z.string().max(MAX_BYTES) });
+export const diagnostic = z.object({ range, message: z.string().max(8000), severity: z.number().int().min(1).max(4).default(1), source: z.string().max(200).optional(), code: z.union([z.string(), z.number()]).optional() });
+export type Diagnostic = z.output<typeof diagnostic>;
+export const inspection = z.object({ diagnostics: z.array(diagnostic).max(1000) });
+export type Inspection = z.output<typeof inspection>;
+export const inspect = defineRpc({ name: 'editor.inspect', input: file.extend({ editorId: z.string().min(1).max(100), position: point, buffers: z.array(buffer).min(1).max(30) }), output: inspection });
 export const lookup = defineRpc({ name: 'editor.lookup', input: file.extend({ editorId: z.string().min(1).max(100), kind: z.enum(['definition', 'references']), position: point, buffers: z.array(buffer).min(1).max(30) }), output: z.object({ targets: z.array(target), omitted: z.number().int().min(0) }) });
 export const release = defineRpc({ name: 'editor.release', input: workspace.extend({ editorId: z.string().min(1).max(100) }), output: z.object({}) });
 export type EditorApi = {
+  inspect(input: RpcInput<typeof inspect>): Promise<Inspection>;
   lookup(input: RpcInput<typeof lookup>): Promise<RpcOutput<typeof lookup>>;
   release(input: RpcInput<typeof release>): Promise<RpcOutput<typeof release>>;
 };
