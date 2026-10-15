@@ -148,6 +148,8 @@ async function signatureChecks() {
     const text = 'def greet(name: str, count: int) -> str:\n    return name * count\nresult = greet("Ada", 2)\n';
     binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: text }, selection: { anchor: text.lastIndexOf(', 2') + 2 } }); binding.view.focus();
     await until(() => active().includes('count'), 'No active second parameter');
+    if (!tip().querySelector('[data-active-parameter] [class*=tok-]')) throw new Error('Active signature argument not syntax highlighted');
+    if (getComputedStyle(tip()).fontFamily !== getComputedStyle(binding.view.contentDOM).fontFamily) throw new Error('Signature font differs from editor');
     binding.view.dispatch({ selection: { anchor: text.lastIndexOf('greet(') + 6 } });
     await until(() => active().includes('name'), 'Signature did not update for first parameter');
     binding.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
@@ -178,10 +180,22 @@ async function hoverChecks() {
     await until(() => !!document.querySelector('[data-lsp-tooltip]')?.textContent?.includes('value'), 'No Python type hover');
     const tooltip = document.querySelector<HTMLElement>('[data-lsp-tooltip]')!;
     if (tooltip.querySelector('script, iframe, img')) throw new Error('Hover rendered server HTML');
+    if (getComputedStyle(tooltip).fontFamily !== getComputedStyle(binding.view.contentDOM).fontFamily) throw new Error('Tooltip did not inherit editor font');
+    const tokens = [...tooltip.querySelectorAll<HTMLElement>('[class*="tok-"]')];
+    if (!tokens.some(token => getComputedStyle(token).color !== getComputedStyle(tooltip).color)) throw new Error('Python hover not syntax highlighted');
+    intelligence.update(api, { surface0: '#fff', foreground: '#151515', border: '#ccc', accent: '#2255bb' }, () => {});
+    binding.view.contentDOM.dispatchEvent(new MouseEvent('mousemove', { clientX: coords.left, clientY: (coords.top + coords.bottom) / 2, bubbles: true }));
+    await until(() => tooltip.style.display !== 'none' && !!tooltip.querySelector('[class*="tok-"]'), 'Light theme tooltip failed');
+    if (getComputedStyle(tooltip).color !== 'rgb(21, 21, 21)') throw new Error('Tooltip theme did not update');
+    inspectOverride = async input => input.kind === 'hover' ? { diagnostics: [], hover: [{ text: '<img src=x onerror=alert(1)>', language: 'python' }] } : call('inspect', input);
+    binding.view.contentDOM.dispatchEvent(new MouseEvent('mousemove', { clientX: coords.left, clientY: (coords.top + coords.bottom) / 2, bubbles: true }));
+    await until(() => !!tooltip.textContent?.includes('<img'), 'Missing hostile hover probe');
+    if (tooltip.querySelector('img')) throw new Error('Highlighted hover executed server markup');
+    inspectOverride = undefined;
     binding.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     if (tooltip.style.display !== 'none') throw new Error('Escape did not dismiss hover');
-    return ['Python hover shows type information', 'hover uses text-only content', 'Escape dismisses hover'];
-  } finally { await intelligence.dispose(); binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: original } }); }
+    return ['Python hover shows type information', 'tooltip inherits monospace editor font', 'Python syntax highlighting', 'light theme highlighting', 'server HTML remains literal text', 'Escape dismisses hover'];
+  } finally { inspectOverride = undefined; await intelligence.dispose(); binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: original } }); }
 }
 async function diagnosticsChecks() {
   const until = async (check: () => boolean, detail: string) => { const end = Date.now() + 15_000; while (!check()) { if (Date.now() > end) throw new Error(detail); await new Promise(resolve => setTimeout(resolve, 50)); } };

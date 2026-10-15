@@ -1,5 +1,6 @@
 import type { EditorView } from '@codemirror/view';
 import type { PluginTheme } from '@getpaseo/plugin';
+import { appendCode } from './tooltip-code.ts';
 import { nativeEditors, editorBuffers, type Binding } from './native.ts';
 import { positionOffset, type Diagnostic, type EditorApi, type Signature } from '../shared/contracts.ts';
 
@@ -23,7 +24,7 @@ export class Intelligence {
   private observer: MutationObserver;
   constructor(private api: EditorApi, private hostId: string, private editorId: string, colors: IntelligenceColors, private notify: (message: string, error?: boolean) => void) {
     document.head.append(this.style);
-    this.tooltip.dataset.lspTooltip = ''; this.tooltip.setAttribute('role', 'tooltip');
+    this.tooltip.id = this.id; this.tooltip.dataset.lspTooltip = ''; this.tooltip.setAttribute('role', 'tooltip');
     document.body.append(this.tooltip); this.update(api, colors, notify); this.hide();
     document.addEventListener('mousemove', this.mouse, true);
     document.addEventListener('keydown', this.key, true);
@@ -34,8 +35,17 @@ export class Intelligence {
   }
   update(api: EditorApi, colors: IntelligenceColors, notify: (message: string, error?: boolean) => void) {
     this.api = api; this.notify = notify;
-    this.style.textContent = [1, 2, 3, 4].map(severity => `::highlight(${this.id}-${severity}) { text-decoration: underline wavy ${severity === 1 ? '#ed6666' : severity === 2 ? '#d6a642' : colors.accent}; text-underline-offset: 3px; }`).join('\n');
-    this.tooltip.style.cssText = `display:none;position:fixed;z-index:100000;max-width:min(600px,calc(100vw - 16px));max-height:40vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:8px;border:1px solid ${colors.border};border-radius:4px;background:${colors.surface0};color:${colors.foreground};font:13px/1.5 system-ui;box-shadow:0 2px 10px #0004`;
+    this.style.textContent = [1, 2, 3, 4].map(severity => `::highlight(${this.id}-${severity}) { text-decoration: underline wavy ${severity === 1 ? '#ed6666' : severity === 2 ? '#d6a642' : colors.accent}; text-underline-offset: 3px; }`).join('\n') + `
+#${this.id} code {font:inherit}
+#${this.id} .tok-keyword {color:color-mix(in srgb,#b06acb 75%,${colors.foreground})}
+#${this.id} .tok-typeName, #${this.id} .tok-className {color:color-mix(in srgb,#399b93 75%,${colors.foreground})}
+#${this.id} .tok-string, #${this.id} .tok-string2 {color:color-mix(in srgb,#b17d3d 75%,${colors.foreground})}
+#${this.id} .tok-number, #${this.id} .tok-bool {color:color-mix(in srgb,#69983c 75%,${colors.foreground})}
+#${this.id} .tok-comment {color:color-mix(in srgb,#808080 75%,${colors.foreground});font-style:italic}
+#${this.id} .tok-operator {color:${colors.accent}}
+#${this.id} .tok-variableName, #${this.id} .tok-function, #${this.id} .tok-variableName.tok-definition {color:color-mix(in srgb,#4d95cc 75%,${colors.foreground})}
+`;
+    this.tooltip.style.cssText = `display:none;position:fixed;z-index:100000;max-width:min(600px,calc(100vw - 16px));max-height:40vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:8px;border:1px solid ${colors.border};border-radius:4px;background:${colors.surface0};color:${colors.foreground};font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;box-shadow:0 2px 10px #0004`;
   }
   private hide() { this.hoverRequest++; clearTimeout(this.hoverTimer); this.tooltip.style.display = 'none'; }
   private key = (event: KeyboardEvent) => {
@@ -64,12 +74,16 @@ export class Intelligence {
     const request = this.hoverRequest;
     const doc = binding.view.state.doc;
     this.hoverTimer = setTimeout(() => {
-      if (items.length) this.showTooltip(items.map(item => `${item.severity === 1 ? 'Error' : item.severity === 2 ? 'Warning' : 'Info'}${item.source ? ` (${item.source}${item.code !== undefined ? ` ${item.code}` : ''})` : ''}: ${item.message}`).join('\n\n'), event.clientX, event.clientY);
+      if (items.length) this.showTooltip(items.map(item => `${item.severity === 1 ? 'Error' : item.severity === 2 ? 'Warning' : 'Info'}${item.source ? ` (${item.source}${item.code !== undefined ? ` ${item.code}` : ''})` : ''}: ${item.message}`).join('\n\n'), event.clientX, event.clientY, binding);
       else void this.hover(binding, offset, doc, request, event.clientX, event.clientY);
     }, 250);
   };
-  private showTooltip(text: string, x: number, y: number) {
+  private showTooltip(text: string, x: number, y: number, binding: Binding) {
+    this.tooltip.style.fontFamily = getComputedStyle(binding.view.contentDOM).fontFamily || 'monospace';
     this.tooltip.dataset.lspTooltip = ''; this.tooltip.textContent = text; this.tooltip.style.display = 'block';
+    this.positionTooltip(x, y);
+  }
+  private positionTooltip(x: number, y: number) {
     this.tooltip.style.left = `${Math.max(8, Math.min(x, innerWidth - this.tooltip.offsetWidth - 8))}px`;
     this.tooltip.style.top = `${Math.max(8, Math.min(y + 18, innerHeight - this.tooltip.offsetHeight - 8))}px`;
   }
@@ -79,7 +93,15 @@ export class Intelligence {
       const line = doc.lineAt(offset);
       const response = await this.api.inspect({ kind: 'hover', workspaceId: binding.pane.workspaceId, editorId: this.editorId, path: binding.path, buffers: editorBuffers(binding, siblings), position: { line: line.number - 1, character: offset - line.from } });
       if (this.stopped || request !== this.hoverRequest || binding.view.state.doc !== doc || siblings.some((item, index) => item.view.state.doc !== docs[index])) return;
-      if (response.hover) this.showTooltip(response.hover, x, y);
+      if (response.hover) {
+        this.showTooltip('', x, y, binding);
+        for (const block of response.hover) {
+          const element = document.createElement(block.language ? 'code' : 'div'); element.style.display = 'block'; element.style.marginBottom = '6px';
+          if (block.language) appendCode(element, block.text, block.language); else element.textContent = block.text;
+          this.tooltip.append(element);
+        }
+        this.positionTooltip(x, y);
+      }
     } catch { /* Background mouseovers must not interrupt editing or produce repeated error toasts. */ }
   }
   private async signature(context: NonNullable<Intelligence['signatureContext']>) {
@@ -92,24 +114,23 @@ export class Intelligence {
       const response = await this.api.inspect({ kind: 'signature', workspaceId: binding.pane.workspaceId, editorId: this.editorId, path: binding.path, buffers: editorBuffers(binding, siblings), position: { line: line.number - 1, character: head - line.from } });
       if (this.stopped || request !== this.hoverRequest || !binding.view.hasFocus || doc !== binding.view.state.doc || head !== binding.view.state.selection.main.head || siblings.some((item, index) => item.view.state.doc !== docs[index])) return;
       const coords = binding.view.coordsAtPos(head);
-      if (response.signature && coords) this.showSignature(response.signature, coords.left, coords.bottom);
+      if (response.signature && coords) this.showSignature(response.signature, coords.left, coords.bottom, binding);
     } catch { /* Unsupported or unavailable signature help must not interrupt typing. */ }
     finally { this.signaturePending = false; }
   }
-  private showSignature(signature: Signature, x: number, y: number) {
-    this.showTooltip('', x, y);
+  private showSignature(signature: Signature, x: number, y: number, binding: Binding) {
+    this.showTooltip('', x, y, binding);
     this.tooltip.dataset.lspTooltip = 'signature';
     const label = document.createElement('code');
     if (signature.parameter) {
       const [start, end] = signature.parameter;
-      const active = document.createElement('strong'); active.textContent = signature.label.slice(start, end); active.dataset.activeParameter = ''; active.style.textDecoration = 'underline';
-      label.append(signature.label.slice(0, start), active, signature.label.slice(end));
-    } else label.textContent = signature.label;
+      const active = document.createElement('strong'); appendCode(active, signature.label.slice(start, end), binding.path); active.dataset.activeParameter = ''; active.style.textDecoration = 'underline';
+      appendCode(label, signature.label.slice(0, start), binding.path); label.append(active); appendCode(label, signature.label.slice(end), binding.path);
+    } else appendCode(label, signature.label, binding.path);
     this.tooltip.append(label);
     if (signature.documentation) { const docs = document.createElement('div'); docs.style.marginTop = '6px'; docs.textContent = signature.documentation; this.tooltip.append(docs); }
     if (signature.count > 1) { const overload = document.createElement('div'); overload.textContent = `Overload ${signature.index + 1} of ${signature.count}`; this.tooltip.append(overload); }
-    this.tooltip.style.left = `${Math.max(8, Math.min(x, innerWidth - this.tooltip.offsetWidth - 8))}px`;
-    this.tooltip.style.top = `${Math.max(8, Math.min(y + 18, innerHeight - this.tooltip.offsetHeight - 8))}px`;
+    this.positionTooltip(x, y);
   }
   private tick() {
     if (this.stopped || document.hidden) return;

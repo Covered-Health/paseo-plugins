@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { hoverText, signatureInfo } from '../server/details.ts';
+import { hoverContent, signatureInfo } from '../server/details.ts';
 
 test('hover normalizes LSP content forms without rendering HTML', () => {
-  assert.equal(hoverText(null), null);
-  assert.equal(hoverText({ contents: '' }), null);
-  assert.equal(hoverText({ contents: { kind: 'markdown', value: '```python\n(value) x: int\n```\nDocs' } }), '(value) x: int\nDocs');
-  assert.equal(hoverText({ contents: [{ language: 'typescript', value: 'const x: number' }, 'Docs'] }), 'const x: number\n\nDocs');
-  assert.equal(hoverText({ contents: '<script>alert(1)</script>' }), '<script>alert(1)</script>');
-  assert.throws(() => hoverText({ contents: { value: 42 } }));
+  assert.equal(hoverContent(null), null);
+  assert.equal(hoverContent({ contents: '' }), null);
+  assert.deepEqual(hoverContent({ contents: { kind: 'markdown', value: '```python\n(value) x: int\n```\nDocs' } }), [{ text: '(value) x: int', language: 'python' }, { text: 'Docs' }]);
+  assert.deepEqual(hoverContent({ contents: [{ language: 'typescript', value: 'const x: number' }, 'Docs'] }), [{ text: 'const x: number', language: 'typescript' }, { text: 'Docs' }]);
+  assert.deepEqual(hoverContent({ contents: '<script>alert(1)</script>' }), [{ text: '<script>alert(1)</script>' }]);
+  assert.deepEqual(hoverContent({ contents: { kind: 'plaintext', value: '```python\nnot code\n```' } }), [{ text: '```python\nnot code\n```' }]);
+  assert.throws(() => hoverContent({ contents: { value: 42 } }));
 });
 
 test('signature help selects overloads and active parameters using UTF-16 offsets or labels', () => {

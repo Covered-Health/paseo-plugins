@@ -7,7 +7,7 @@ import { z } from 'zod';
 import { buffer, point, range, type Target, positionOffset, diagnostic, type Inspection } from '../shared/contracts.ts';
 import { readConfig, selectServer, CONFIG_FILE, type ScopedServer } from './config.ts';
 import { extname } from 'node:path';
-import { hoverText, signatureInfo } from './details.ts';
+import { hoverContent, signatureInfo } from './details.ts';
 import { contained, checkedText } from './files.ts';
 
 const provider = z.union([z.boolean(), z.record(z.string(), z.unknown())]);
@@ -81,7 +81,7 @@ class Session {
       const response = initialization.parse(await connection.sendRequest('initialize', {
         processId: process.pid, rootUri: pathToFileURL(root).href,
         workspaceFolders: [{ uri: pathToFileURL(root).href, name: root }],
-        capabilities: { general: { positionEncodings: ['utf-16'] }, workspace: { configuration: true, workspaceFolders: true }, window: { workDoneProgress: true }, textDocument: { definition: { linkSupport: true }, references: {}, hover: { contentFormat: ['plaintext', 'markdown'] }, signatureHelp: { contextSupport: true, signatureInformation: { documentationFormat: ['plaintext', 'markdown'], parameterInformation: { labelOffsetSupport: true }, activeParameterSupport: true } }, publishDiagnostics: { versionSupport: true }, diagnostic: { dynamicRegistration: false } } },
+        capabilities: { general: { positionEncodings: ['utf-16'] }, workspace: { configuration: true, workspaceFolders: true }, window: { workDoneProgress: true }, textDocument: { definition: { linkSupport: true }, references: {}, hover: { contentFormat: ['markdown', 'plaintext'] }, signatureHelp: { contextSupport: true, signatureInformation: { documentationFormat: ['plaintext', 'markdown'], parameterInformation: { labelOffsetSupport: true }, activeParameterSupport: true } }, publishDiagnostics: { versionSupport: true }, diagnostic: { dynamicRegistration: false } } },
         initializationOptions: config.initializationOptions,
       }));
       if (response.capabilities.positionEncoding && response.capabilities.positionEncoding !== 'utf-16') throw new Error('Language server selected an unsupported position encoding. UTF-16 is required.');
@@ -118,7 +118,7 @@ class Session {
             }
           }
           if (kind === 'signature') return { diagnostics: [], signature: capabilities.signatureHelpProvider ? signatureInfo(await this.connection.sendRequest('textDocument/signatureHelp', { textDocument: { uri: pathToFileURL(absolute).href }, position, context: { triggerKind: 1, isRetrigger: false } })) : null };
-          if (kind === 'hover') return { diagnostics: [], hover: capabilities.hoverProvider ? hoverText(await this.connection.sendRequest('textDocument/hover', { textDocument: { uri: pathToFileURL(absolute).href }, position })) : null };
+          if (kind === 'hover') return { diagnostics: [], hover: capabilities.hoverProvider ? hoverContent(await this.connection.sendRequest('textDocument/hover', { textDocument: { uri: pathToFileURL(absolute).href }, position })) : null };
           if (kind === 'diagnostics') {
             const uri = pathToFileURL(absolute).href;
             if (capabilities.diagnosticProvider) {
