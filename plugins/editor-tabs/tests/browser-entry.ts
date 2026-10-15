@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { NativeNavigation, nativeEditors } from '../client/native.ts';
+import { Intelligence } from '../client/intelligence.ts';
 import { getResults, subscribeResults } from '../client/results.ts';
 import type { EditorApi } from '../shared/contracts.ts';
 
@@ -13,7 +14,9 @@ const base = 'plugins/editor-tabs/tests/fixtures/';
 let nextResponse: Awaited<ReturnType<EditorApi['lookup']>> | Error | undefined;
 const openedPanels: string[] = [];
 const notices: { message: string; error?: boolean }[] = [];
+let inspectOverride: EditorApi['inspect'] | undefined;
 const api: EditorApi = {
+  inspect: input => inspectOverride ? inspectOverride(input) : call('inspect', input),
   lookup: input => {
     const response = nextResponse; nextResponse = undefined;
     return response instanceof Error ? Promise.reject(response) : response ? Promise.resolve(response) : call('lookup', input);
@@ -130,4 +133,97 @@ async function runChecks() {
   checks.push('cleanup removes injected listeners');
   return checks;
 }
-Object.assign(window, { proof: { runChecks, dispose: async () => { await adapter.dispose(); root.unmount(); } } });
+async function signatureChecks() {
+  const binding = nativeEditors(hostId).find(item => item.path.endsWith('usage.py'))!;
+  const original = binding.view.state.sliceDoc();
+  // Paseo's automated webview runs in the background; simulate the document focus gate only.
+  const focusDescriptor = Object.getOwnPropertyDescriptor(document, 'hasFocus');
+  Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => true });
+  const intelligence = new Intelligence(api, hostId, 'signature-browser-proof', { surface0: '#17191e', foreground: '#e7e9ee', border: '#454b59', accent: '#8eb5ff' }, () => {});
+  const until = async (check: () => boolean, detail: string) => { const end = Date.now() + 15_000; while (!check()) { if (Date.now() > end) throw new Error(detail); await new Promise(resolve => setTimeout(resolve, 50)); } };
+  const active = () => document.querySelector('[data-active-parameter]')?.textContent ?? '';
+  const tip = () => document.querySelector<HTMLElement>('[data-lsp-tooltip]')!;
+  const invoke = () => binding.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: ' ', code: 'Space', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+  try {
+    const text = 'def greet(name: str, count: int) -> str:\n    return name * count\nresult = greet("Ada", 2)\n';
+    binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: text }, selection: { anchor: text.lastIndexOf(', 2') + 2 } }); binding.view.focus();
+    await until(() => active().includes('count'), 'No active second parameter');
+    if (!tip().querySelector('[data-active-parameter] [class*=tok-]')) throw new Error('Active signature argument not syntax highlighted');
+    if (getComputedStyle(tip()).fontFamily !== getComputedStyle(binding.view.contentDOM).fontFamily) throw new Error('Signature font differs from editor');
+    binding.view.dispatch({ selection: { anchor: text.lastIndexOf('greet(') + 6 } });
+    await until(() => active().includes('name'), 'Signature did not update for first parameter');
+    binding.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    if (tip().style.display !== 'none') throw new Error('Escape did not dismiss signature');
+    await new Promise(resolve => setTimeout(resolve, 700));
+    if (tip().style.display !== 'none') throw new Error('Dismissed signature reappeared');
+    invoke(); await until(() => tip().style.display !== 'none' && active().includes('name'), 'Explicit signature invocation failed');
+    let finish: ((value: Awaited<ReturnType<EditorApi['inspect']>>) => void) | undefined;
+    inspectOverride = input => input.kind === 'signature' && !finish ? new Promise(resolve => { finish = resolve; }) : call('inspect', input);
+    invoke(); await until(() => !!finish, 'No delayed signature request');
+    binding.view.dispatch({ selection: { anchor: 0 } });
+    finish!({ diagnostics: [], signature: { label: 'STALE', index: 0, count: 1 } });
+    await new Promise(resolve => setTimeout(resolve, 700));
+    if (tip().style.display !== 'none') throw new Error('Stale signature survived cursor movement');
+    return ['automatic call signature and active argument', 'cursor changes update active argument', 'Escape dismisses without reopening', 'Ctrl+Shift+Space invokes signature', 'late signatures are discarded'];
+  } finally { if (focusDescriptor) Object.defineProperty(document, 'hasFocus', focusDescriptor); else Reflect.deleteProperty(document, 'hasFocus'); inspectOverride = undefined; await intelligence.dispose(); binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: original }, selection: { anchor: 0 } }); }
+}
+async function hoverChecks() {
+  const binding = nativeEditors(hostId).find(item => item.path.endsWith('usage.py'))!;
+  const original = binding.view.state.sliceDoc();
+  const intelligence = new Intelligence(api, hostId, 'hover-browser-proof', { surface0: '#17191e', foreground: '#e7e9ee', border: '#454b59', accent: '#8eb5ff' }, () => {});
+  const until = async (check: () => boolean, detail: string) => { const end = Date.now() + 15_000; while (!check()) { if (Date.now() > end) throw new Error(detail); await new Promise(resolve => setTimeout(resolve, 50)); } };
+  try {
+    binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: 'value: int = 1\n' } });
+    await new Promise(resolve => setTimeout(resolve, 750));
+    const coords = binding.view.coordsAtPos(2)!;
+    binding.view.contentDOM.dispatchEvent(new MouseEvent('mousemove', { clientX: coords.left, clientY: (coords.top + coords.bottom) / 2, bubbles: true }));
+    await until(() => !!document.querySelector('[data-lsp-tooltip]')?.textContent?.includes('value'), 'No Python type hover');
+    const tooltip = document.querySelector<HTMLElement>('[data-lsp-tooltip]')!;
+    if (tooltip.querySelector('script, iframe, img')) throw new Error('Hover rendered server HTML');
+    if (getComputedStyle(tooltip).fontFamily !== getComputedStyle(binding.view.contentDOM).fontFamily) throw new Error('Tooltip did not inherit editor font');
+    const tokens = [...tooltip.querySelectorAll<HTMLElement>('[class*="tok-"]')];
+    if (!tokens.some(token => getComputedStyle(token).color !== getComputedStyle(tooltip).color)) throw new Error('Python hover not syntax highlighted');
+    intelligence.update(api, { surface0: '#fff', foreground: '#151515', border: '#ccc', accent: '#2255bb' }, () => {});
+    binding.view.contentDOM.dispatchEvent(new MouseEvent('mousemove', { clientX: coords.left, clientY: (coords.top + coords.bottom) / 2, bubbles: true }));
+    await until(() => tooltip.style.display !== 'none' && !!tooltip.querySelector('[class*="tok-"]'), 'Light theme tooltip failed');
+    if (getComputedStyle(tooltip).color !== 'rgb(21, 21, 21)') throw new Error('Tooltip theme did not update');
+    inspectOverride = async input => input.kind === 'hover' ? { diagnostics: [], hover: [{ text: '<img src=x onerror=alert(1)>', language: 'python' }] } : call('inspect', input);
+    binding.view.contentDOM.dispatchEvent(new MouseEvent('mousemove', { clientX: coords.left, clientY: (coords.top + coords.bottom) / 2, bubbles: true }));
+    await until(() => !!tooltip.textContent?.includes('<img'), 'Missing hostile hover probe');
+    if (tooltip.querySelector('img')) throw new Error('Highlighted hover executed server markup');
+    inspectOverride = undefined;
+    binding.view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    if (tooltip.style.display !== 'none') throw new Error('Escape did not dismiss hover');
+    return ['Python hover shows type information', 'tooltip inherits monospace editor font', 'Python syntax highlighting', 'light theme highlighting', 'server HTML remains literal text', 'Escape dismisses hover'];
+  } finally { inspectOverride = undefined; await intelligence.dispose(); binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: original } }); }
+}
+async function diagnosticsChecks() {
+  const until = async (check: () => boolean, detail: string) => { const end = Date.now() + 15_000; while (!check()) { if (Date.now() > end) throw new Error(detail); await new Promise(resolve => setTimeout(resolve, 50)); } };
+  let current = nativeEditors(hostId).find(binding => binding.path.endsWith('usage.py'));
+  await until(() => !!(current = nativeEditors(hostId).find(binding => binding.path.endsWith('usage.py'))), 'Missing Python editor');
+  const binding = current!;
+  const original = binding.view.state.sliceDoc();
+  const errors: string[] = [];
+  const intelligence = new Intelligence(api, hostId, 'diagnostics-browser-proof', { surface0: '#17191e', foreground: '#e7e9ee', border: '#454b59', accent: '#8eb5ff' }, message => errors.push(message));
+  const highlights = () => [...CSS.highlights.entries()].filter(([name]) => name.startsWith('paseo-lsp-'));
+  const count = () => highlights().reduce((sum, [, highlight]) => sum + highlight.size, 0);
+  try {
+    binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: 'value: int = "wrong"\n' } });
+    await until(() => count() > 0, 'No squiggle for unsaved Python type error: ' + errors.join(';'));
+    const line = binding.view.state.doc.line(1);
+    const coords = binding.view.coordsAtPos(line.to - 3)!;
+    binding.view.contentDOM.dispatchEvent(new MouseEvent('mousemove', { clientX: coords.left, clientY: (coords.top + coords.bottom) / 2, bubbles: true }));
+    await until(() => !!document.querySelector<HTMLElement>('[data-lsp-tooltip]')?.textContent?.includes('Error'), 'Missing diagnostic mouseover');
+    const tooltip = document.querySelector<HTMLElement>('[data-lsp-tooltip]')!;
+    if (tooltip.style.display === 'none') throw new Error('Diagnostic tooltip hidden');
+    binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: 'value: int = 1\n' } });
+    await until(() => count() === 0, 'Old squiggle survived correction');
+    if (binding.view.state.sliceDoc() !== 'value: int = 1\n') throw new Error('Highlights modified native text');
+    await intelligence.dispose();
+    if (highlights().length || document.querySelector('[data-lsp-tooltip]')) throw new Error('Diagnostic UI survived cleanup');
+    return ['unsaved Python diagnostics render squiggles', 'diagnostic mouseover', 'correction clears stale diagnostics', 'highlights preserve native text', 'diagnostic cleanup'];
+  } finally {
+    await intelligence.dispose(); binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: original } });
+  }
+}
+Object.assign(window, { proof: { runChecks, diagnosticsChecks, hoverChecks, signatureChecks, dispose: async () => { await adapter.dispose(); root.unmount(); } } });

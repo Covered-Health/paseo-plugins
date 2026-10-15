@@ -7,7 +7,7 @@ type Pane = {
   openFileInWorkspace(input: { location: { path: string; lineStart: number; lineEnd: number }; disposition: 'main' }): void;
 };
 type Fiber = { memoizedProps?: Record<string, unknown>; return?: Fiber | null };
-type Binding = { element: HTMLElement; view: EditorView; pane: Pane; path: string };
+export type Binding = { element: HTMLElement; view: EditorView; pane: Pane; path: string };
 function object(value: unknown): value is Record<string, unknown> { return typeof value === 'object' && value !== null; }
 
 // shortcut: React's DOM fiber key and Paseo's pane context are private; fail closed if their shapes change.
@@ -28,6 +28,16 @@ export function nativeEditors(hostId: string, workspaceId?: string): Binding[] {
     if (view && !view.state.readOnly) bindings.push({ element, pane, view, path: pane.target.path });
   }
   return bindings;
+}
+export function editorBuffers(source: Binding, bindings = nativeEditors(source.pane.serverId, source.pane.workspaceId)) {
+  const buffers = new Map<string, string>();
+  for (const binding of bindings) {
+    const text = binding.view.state.sliceDoc();
+    if (binding.path !== source.path && buffers.has(binding.path) && buffers.get(binding.path) !== text) throw new Error('Another file has differing buffers in multiple native panes. Save or reconcile those panes first.');
+    buffers.set(binding.path, text);
+  }
+  buffers.set(source.path, source.view.state.sliceDoc());
+  return [...buffers].map(([path, text]) => ({ path, text }));
 }
 export class NativeNavigation {
   private editorId = `native-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -97,14 +107,7 @@ export class NativeNavigation {
     };
     try {
       publish(`Finding ${kind === 'definition' ? 'definition' : 'usages'}…`);
-      const buffersByPath = new Map<string, string>();
-      for (const binding of nativeEditors(this.hostId, source.pane.workspaceId)) {
-        const text = binding.view.state.sliceDoc();
-        if (binding.path !== source.path && buffersByPath.has(binding.path) && buffersByPath.get(binding.path) !== text) throw new Error('Another file has differing buffers in multiple native panes. Save or reconcile those panes first.');
-        buffersByPath.set(binding.path, text);
-      }
-      buffersByPath.set(source.path, state.sliceDoc());
-      const buffers = [...buffersByPath].map(([path, text]) => ({ path, text }));
+      const buffers = editorBuffers(source);
       this.sessions.add(source.pane.workspaceId);
       const response = await this.api.lookup({ workspaceId: source.pane.workspaceId, editorId: this.editorId, path: source.path, buffers, position: { line: line.number - 1, character: head - line.from }, kind });
       if (this.stopped || request !== this.request) return;

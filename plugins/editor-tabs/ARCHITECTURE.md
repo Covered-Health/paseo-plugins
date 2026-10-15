@@ -29,6 +29,16 @@ The probe and its logging RPC were removed afterwards. Production code contains 
 - The adapter calls the pane’s native `openFileInWorkspace` with the target and line range. It waits for the destination editor, then dispatches a plain selection transaction and focuses it. Existing native file-opening paths continue to work unchanged.
 - Pane lookup checks private shapes at runtime. Unknown editors/hosts are not intercepted. Disposal removes DOM listeners and workspace results, cancels pending destination waits and releases language sessions. Request deadlines, idle eviction and plugin shutdown terminate server processes; POSIX process groups include children.
 
+## Diagnostics
+
+`client/intelligence.ts` observes mounted native editors every 250 ms, debounces changed documents for 350 ms and refreshes diagnostics at most once per second per visible pane. Each scope keeps its own persistent session; background intelligence uses a separate editor ID from explicit navigation so closing a navigation surface cannot race its overlays. All sibling buffers are synchronized, and a response is discarded if any supplied buffer changed while it was running. DOM ranges are rebuilt after viewport DOM changes/scrolls, and diagnostics are cleared immediately on document changes.
+
+The bridge handles `publishDiagnostics` (filtering explicit stale document versions) and pull diagnostics when advertised. A server that omits diagnostic versions cannot provide the same stale-report guarantee. Invalid reports are discarded. CSS Custom Highlights draw wavy error/warning underlines without injecting foreign CodeMirror state fields or changing native text/history. Mouseovers use text-only tooltips; no server-provided HTML is executed. Missing workspace config and uncovered extensions do not produce repeated background toasts. Cleanup removes highlights/tooltips/listeners and releases processes. Closed files are not proactively analyzed.
+
+Hover uses `textDocument/hover` after a 250 ms pointer pause and checks the advertised capability. LSP MarkedString/MarkupContent forms become bounded text/code blocks, preserving fenced language information. Standalone Lezer parsers color Python and TypeScript/JavaScript code without installing extensions into Paseo’s CodeMirror. Tooltips inherit the native editor’s font and use theme-adjusted syntax colors. Prose and unknown languages remain plain text; all markup is constructed from text nodes and token spans. Pointer movement, scrolling, keystrokes, buffer changes and disposal invalidate outstanding responses. Diagnostic messages take precedence when hovering over a squiggle.
+
+Signature help uses `textDocument/signatureHelp` after a focused caret/document change settles for 250 ms, or on Ctrl+Shift+Space. The server selects the call/overload; the client highlights the active parameter using LSP UTF-16 label offsets (or a string label). It renders signature labels with syntax coloring and preserves active-parameter emphasis; signature and parameter documentation remain plain text. Old caret/document/focus generations cannot reopen a tooltip, and Escape keeps it dismissed until the context changes or it is explicitly invoked. Unavailable hover/signature support returns an empty result without tearing down a healthy diagnostic session.
+
 ## Alternatives revisited
 
 | Approach | Outcome |
@@ -59,9 +69,9 @@ Paseo owns dirty-buffer retention. The plugin supplies mounted buffers; other fi
 
 ## Reproduce verification
 
-`npm run typecheck` and `npm test` run the host checks, including real TypeScript and basedpyright sessions, scope/CWD/root verification, buffer isolation and config reload/failure behavior. `npm run browser-harness -- <workspace-id>` starts a development-only loopback fixture host. At its printed URL, run `await window.proof.runChecks()` to exercise the adapter through React-owned native-shaped panes and live daemon RPCs. The browser fixture validates opening callbacks, target selections, Python usages and unsaved buffers, Cmd-click handling, native context-menu preservation, panel opening, empty/error states, unknown-editor guards and listener cleanup. It does not replace the separate live-app proof described above.
+`npm run typecheck` and `npm test` run the host checks, including real TypeScript and basedpyright sessions, scope/CWD/root verification, buffer isolation and config reload/failure behavior. `npm run browser-harness -- <workspace-id>` starts a development-only loopback fixture host. At its printed URL, run `await window.proof.runChecks()` to exercise the adapter through React-owned native-shaped panes and live daemon RPCs. The browser fixture validates opening callbacks, target selections, Python usages and unsaved buffers, Cmd-click handling, native context-menu preservation, panel opening, empty/error states, unknown-editor guards and listener cleanup. Diagnostics, hover and signature checks are exposed separately as `window.proof.diagnosticsChecks()`, `hoverChecks()` and `signatureChecks()`. The automated webview is in the background, so signature checks simulate document focus while exercising real LSP requests and cursor behavior. This harness does not replace the separate live-app navigation proof described above.
 
-The local HTTP harness is not shipped, validates its HTTP origin/workspace, and exposes only this plugin's lookup/release RPCs. The installed plugin needs no HTTP service.
+The local HTTP harness is not shipped, validates its HTTP origin/workspace, and exposes only this plugin's lookup/inspect/release RPCs. The installed plugin needs no HTTP service.
 
 ## References
 
