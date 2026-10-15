@@ -1,1 +1,0 @@
-{"id":"editor-tabs","requirements":{"paseo":">=0.11.2"},"build":[["npm","ci","--omit=dev"]]}

@@ -10,7 +10,7 @@ import type { EditorApi } from '../shared/contracts.ts';
 const workspaceId = new URL(location.href).searchParams.get('workspaceId');
 if (!workspaceId) throw new Error('Missing workspaceId');
 const hostId = 'native-browser-proof';
-const base = 'plugins/editor-tabs/tests/fixtures/';
+const base = 'plugins/lsp/tests/fixtures/';
 let nextResponse: Awaited<ReturnType<EditorApi['lookup']>> | Error | undefined;
 const openedPanels: string[] = [];
 const notices: { message: string; error?: boolean }[] = [];

@@ -43,28 +43,28 @@ No runtime npm dependencies or separate build step are required.
 
 ## Native code navigation
 
-`plugins/editor-tabs` now injects go-to-definition and usages into **Paseo's existing editor and native file tabs**. The separate editor, file browser and save implementation have been removed. Open files normally, then use F12, Shift+F12 or Cmd/Ctrl-click. The plugin reads unsaved native buffers, opens a single result directly in a native file tab, and selects the Navigation tab in the right-hand Explorer sidebar only for multiple results. No results and errors show a brief butter bar without changing sidebar tabs. The normal editor context menu is left untouched.
+`plugins/lsp` now injects go-to-definition and usages into **Paseo's existing editor and native file tabs**. The separate editor, file browser and save implementation have been removed. Open files normally, then use F12, Shift+F12 or Cmd/Ctrl-click. The plugin reads unsaved native buffers, opens a single result directly in a native file tab, and selects the Navigation tab in the right-hand Explorer sidebar only for multiple results. No results and errors show a brief butter bar without changing sidebar tabs. The normal editor context menu is left untouched.
 
 The workspace config in [`.paseo/lsp.json`](.paseo/lsp.json) uses **basedpyright** for Python (`.py` and `.pyi`). On the daemon host:
 
 ```sh
 uv tool install basedpyright
 npm install -g typescript-language-server typescript
-paseo plugin install github:covered-health/paseo-plugins:plugins/editor-tabs
+paseo plugin install git:covered-health/paseo-plugins:plugins/lsp
 ```
 
-Configure servers in **`.paseo/lsp.json` in each workspace**, rather than the plugin UI. Each profile maps extensions to language IDs and may specify a directory `path`; omitted paths cover the workspace root. The deepest matching scope wins, and its directory becomes the server's CWD and LSP root. Saved config changes take effect on the next navigation lookup and restart that workspace's sessions. See [config examples and rules](plugins/editor-tabs/OVERVIEW.md).
+Configure servers in **`.paseo/lsp.json` in each workspace**, rather than the plugin UI. Each profile maps extensions to language IDs and may specify a directory `path`; omitted paths cover the workspace root. The deepest matching scope wins, and its directory becomes the server's CWD and LSP root. Saved config changes take effect on the next navigation lookup and restart that workspace's sessions. See [config examples and rules](plugins/lsp/OVERVIEW.md).
 
 Open file editors also receive LSP error/warning squiggles with mouseover messages, including unsaved edits. Buffers sync after a short typing pause, and diagnostics refresh about once per second. Highlights use the browser's CSS Highlight API and preserve Paseo's editing/undo behavior; browsers without that API cannot display squiggles. Hover over a symbol to see its inferred type/signature and documentation. Pause the caret inside a call to see the active signature and argument, or invoke it with Ctrl+Shift+Space. Tooltips inherit the editor’s monospace font and syntax-highlight Python and TypeScript/JavaScript code blocks and signatures. Prose and unsupported languages remain plain text; server HTML is never executed. Tooltips close on Escape, editing or scrolling. Python and TypeScript diagnostics, hover and signature help are tested. Autocomplete is not included. Closed/unmounted files are not checked proactively.
 
 The npm tools are needed only for JavaScript/TypeScript. A Python profile can instead use `command: "ty"`, `args: ["server"]` and `languages: {"py":"python","pyi":"python"}`. basedpyright is tested; ty is not yet verified.
 
-This uses private React pane context because Paseo has no supported editor-extension API. It was proven in the live macOS Paseo 0.11.2 app, including native Python definition tabs, exact symbol selection and usages. A Paseo update may require adapting the private bridge. The plugin remains installed as `editor-tabs`; it no longer contributes replacement tabs. See [architecture and proof](plugins/editor-tabs/ARCHITECTURE.md) and [setup and limits](plugins/editor-tabs/OVERVIEW.md).
+This uses private React pane context because Paseo has no supported editor-extension API. It was proven in the live macOS Paseo 0.11.2 app, including native Python definition tabs, exact symbol selection and usages. A Paseo update may require adapting the private bridge. The plugin directory and installation ID are `lsp`; it does not contribute replacement tabs. See [architecture and proof](plugins/lsp/ARCHITECTURE.md) and [setup and limits](plugins/lsp/OVERVIEW.md).
 
 Development uses Node.js 22.18+:
 
 ```sh
-cd plugins/editor-tabs
+cd plugins/lsp
 npm ci
 npm run typecheck
 npm test
