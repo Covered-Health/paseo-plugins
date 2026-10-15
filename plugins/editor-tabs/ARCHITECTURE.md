@@ -37,6 +37,8 @@ The bridge handles `publishDiagnostics` (filtering explicit stale document versi
 
 Hover uses `textDocument/hover` after a 250 ms pointer pause and checks the advertised capability. LSP MarkedString/MarkupContent forms become bounded text-only content; code fences are removed for display. Pointer movement, scrolling, keystrokes, buffer changes and disposal invalidate outstanding responses. Diagnostic messages take precedence when hovering over a squiggle.
 
+Signature help uses `textDocument/signatureHelp` after a focused caret/document change settles for 250 ms, or on Ctrl+Shift+Space. The server selects the call/overload; the client highlights the active parameter using LSP UTF-16 label offsets (or a string label). It renders signature and parameter documentation as text. Old caret/document/focus generations cannot reopen a tooltip, and Escape keeps it dismissed until the context changes or it is explicitly invoked. Unavailable hover/signature support returns an empty result without tearing down a healthy diagnostic session.
+
 ## Alternatives revisited
 
 | Approach | Outcome |
@@ -67,9 +69,9 @@ Paseo owns dirty-buffer retention. The plugin supplies mounted buffers; other fi
 
 ## Reproduce verification
 
-`npm run typecheck` and `npm test` run the host checks, including real TypeScript and basedpyright sessions, scope/CWD/root verification, buffer isolation and config reload/failure behavior. `npm run browser-harness -- <workspace-id>` starts a development-only loopback fixture host. At its printed URL, run `await window.proof.runChecks()` to exercise the adapter through React-owned native-shaped panes and live daemon RPCs. The browser fixture validates opening callbacks, target selections, Python usages and unsaved buffers, Cmd-click handling, native context-menu preservation, panel opening, empty/error states, unknown-editor guards and listener cleanup. It does not replace the separate live-app proof described above.
+`npm run typecheck` and `npm test` run the host checks, including real TypeScript and basedpyright sessions, scope/CWD/root verification, buffer isolation and config reload/failure behavior. `npm run browser-harness -- <workspace-id>` starts a development-only loopback fixture host. At its printed URL, run `await window.proof.runChecks()` to exercise the adapter through React-owned native-shaped panes and live daemon RPCs. The browser fixture validates opening callbacks, target selections, Python usages and unsaved buffers, Cmd-click handling, native context-menu preservation, panel opening, empty/error states, unknown-editor guards and listener cleanup. Diagnostics, hover and signature checks are exposed separately as `window.proof.diagnosticsChecks()`, `hoverChecks()` and `signatureChecks()`. The automated webview is in the background, so signature checks simulate document focus while exercising real LSP requests and cursor behavior. This harness does not replace the separate live-app navigation proof described above.
 
-The local HTTP harness is not shipped, validates its HTTP origin/workspace, and exposes only this plugin's lookup/release RPCs. The installed plugin needs no HTTP service.
+The local HTTP harness is not shipped, validates its HTTP origin/workspace, and exposes only this plugin's lookup/inspect/release RPCs. The installed plugin needs no HTTP service.
 
 ## References
 

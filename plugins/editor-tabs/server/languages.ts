@@ -7,11 +7,11 @@ import { z } from 'zod';
 import { buffer, point, range, type Target, positionOffset, diagnostic, type Inspection } from '../shared/contracts.ts';
 import { readConfig, selectServer, CONFIG_FILE, type ScopedServer } from './config.ts';
 import { extname } from 'node:path';
-import { hoverText } from './details.ts';
+import { hoverText, signatureInfo } from './details.ts';
 import { contained, checkedText } from './files.ts';
 
 const provider = z.union([z.boolean(), z.record(z.string(), z.unknown())]);
-const initialization = z.object({ capabilities: z.object({ positionEncoding: z.string().optional(), definitionProvider: provider.optional(), referencesProvider: provider.optional(), diagnosticProvider: provider.optional(), hoverProvider: provider.optional() }) });
+const initialization = z.object({ capabilities: z.object({ positionEncoding: z.string().optional(), definitionProvider: provider.optional(), referencesProvider: provider.optional(), diagnosticProvider: provider.optional(), hoverProvider: provider.optional(), signatureHelpProvider: provider.optional() }) });
 const location = z.object({ uri: z.string(), range });
 const link = z.object({ targetUri: z.string(), targetRange: range, targetSelectionRange: range });
 const locations = z.union([z.null(), location, z.array(z.union([location, link]))]);
@@ -81,7 +81,7 @@ class Session {
       const response = initialization.parse(await connection.sendRequest('initialize', {
         processId: process.pid, rootUri: pathToFileURL(root).href,
         workspaceFolders: [{ uri: pathToFileURL(root).href, name: root }],
-        capabilities: { general: { positionEncodings: ['utf-16'] }, workspace: { configuration: true, workspaceFolders: true }, window: { workDoneProgress: true }, textDocument: { definition: { linkSupport: true }, references: {}, hover: { contentFormat: ['plaintext', 'markdown'] }, publishDiagnostics: { versionSupport: true }, diagnostic: { dynamicRegistration: false } } },
+        capabilities: { general: { positionEncodings: ['utf-16'] }, workspace: { configuration: true, workspaceFolders: true }, window: { workDoneProgress: true }, textDocument: { definition: { linkSupport: true }, references: {}, hover: { contentFormat: ['plaintext', 'markdown'] }, signatureHelp: { contextSupport: true, signatureInformation: { documentationFormat: ['plaintext', 'markdown'], parameterInformation: { labelOffsetSupport: true }, activeParameterSupport: true } }, publishDiagnostics: { versionSupport: true }, diagnostic: { dynamicRegistration: false } } },
         initializationOptions: config.initializationOptions,
       }));
       if (response.capabilities.positionEncoding && response.capabilities.positionEncoding !== 'utf-16') throw new Error('Language server selected an unsupported position encoding. UTF-16 is required.');
@@ -90,7 +90,7 @@ class Session {
     })();
     void this.ready.catch(() => {});
   }
-  query(files: { absolute: string; text: string; languageId: string }[], absolute: string, position: z.output<typeof point>, kind: 'definition' | 'references' | 'diagnostics' | 'hover', timeoutMs: number) {
+  query(files: { absolute: string; text: string; languageId: string }[], absolute: string, position: z.output<typeof point>, kind: 'definition' | 'references' | 'diagnostics' | 'hover' | 'signature', timeoutMs: number) {
     const work = this.queue.catch(() => {}).then(async () => {
       if (this.closing) throw new Error('Language server session closed. Retry navigation.');
       this.lastUsed = Date.now();
@@ -117,6 +117,7 @@ class Session {
               this.documents.set(uri, { text: file.text, version: old.version + 1 });
             }
           }
+          if (kind === 'signature') return { diagnostics: [], signature: capabilities.signatureHelpProvider ? signatureInfo(await this.connection.sendRequest('textDocument/signatureHelp', { textDocument: { uri: pathToFileURL(absolute).href }, position, context: { triggerKind: 1, isRetrigger: false } })) : null };
           if (kind === 'hover') return { diagnostics: [], hover: capabilities.hoverProvider ? hoverText(await this.connection.sendRequest('textDocument/hover', { textDocument: { uri: pathToFileURL(absolute).href }, position })) : null };
           if (kind === 'diagnostics') {
             const uri = pathToFileURL(absolute).href;
@@ -167,10 +168,10 @@ export class Languages {
   async lookup(root: string, editorId: string, path: string, buffers: z.output<typeof buffer>[], position: z.output<typeof point>, kind: 'definition' | 'references', timeoutMs = 30_000) {
     return await this.request(root, editorId, path, buffers, position, kind, timeoutMs) as { targets: Target[]; omitted: number };
   }
-  async inspect(root: string, editorId: string, path: string, buffers: z.output<typeof buffer>[], position: z.output<typeof point>, kind: 'diagnostics' | 'hover' = 'diagnostics') {
+  async inspect(root: string, editorId: string, path: string, buffers: z.output<typeof buffer>[], position: z.output<typeof point>, kind: 'diagnostics' | 'hover' | 'signature' = 'diagnostics') {
     return await this.request(root, editorId, path, buffers, position, kind, 30_000) as Inspection;
   }
-  private async request(root: string, editorId: string, path: string, buffers: z.output<typeof buffer>[], position: z.output<typeof point>, kind: 'definition' | 'references' | 'diagnostics' | 'hover', timeoutMs: number): Promise<{ targets: Target[]; omitted: number } | Inspection> {
+  private async request(root: string, editorId: string, path: string, buffers: z.output<typeof buffer>[], position: z.output<typeof point>, kind: 'definition' | 'references' | 'diagnostics' | 'hover' | 'signature', timeoutMs: number): Promise<{ targets: Target[]; omitted: number } | Inspection> {
     if (this.stopped) throw new Error('Editor plugin stopped.');
     root = await realpath(root);
     let servers: ScopedServer[];

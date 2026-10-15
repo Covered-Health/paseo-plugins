@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Languages } from '../server/languages.ts';
 
-for (const extension of ['py', 'ts']) test(`${extension} diagnostics follow unsaved edits and clear after correction`, { timeout: 30_000 }, async () => {
+for (const extension of ['py', 'ts']) test(`${extension} diagnostics, hover and signature help follow unsaved buffers`, { timeout: 30_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'paseo-diagnostics-'));
   const languages = new Languages();
   const path = `example.${extension}`;
@@ -32,6 +32,16 @@ for (const extension of ['py', 'ts']) test(`${extension} diagnostics follow unsa
     assert.equal((await inspect()).diagnostics.length, 0, 'Kept diagnostics for an older document version');
     await new Promise(resolve => setTimeout(resolve, 300));
     assert.equal((await inspect()).diagnostics.length, 0);
+    buffers[0].text = python
+      ? 'def greet(name: str, count: int) -> str:\n    return name * count\nresult = greet("Ada", 2)\n'
+      : 'function greet(name: string, count: number): string { return name.repeat(count); }\nconst result = greet("Ada", 2);\n';
+    const callLine = python ? 2 : 1;
+    const call = buffers[0].text.split('\n')[callLine];
+    const signature = (await languages.inspect(root, 'diagnostics', path, buffers, { line: callLine, character: call.indexOf(', 2') + 2 }, 'signature')).signature;
+    assert.ok(signature, 'No signature help');
+    assert.ok(signature.label.includes('count'), JSON.stringify(signature));
+    assert.ok(signature.parameter, 'Missing active parameter');
+    assert.ok(signature.label.slice(...signature.parameter).includes('count'), JSON.stringify(signature));
   } finally { await languages.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 

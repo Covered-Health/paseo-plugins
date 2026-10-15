@@ -1,10 +1,10 @@
 import type { EditorView } from '@codemirror/view';
 import type { PluginTheme } from '@getpaseo/plugin';
 import { nativeEditors, editorBuffers, type Binding } from './native.ts';
-import { positionOffset, type Diagnostic, type EditorApi } from '../shared/contracts.ts';
+import { positionOffset, type Diagnostic, type EditorApi, type Signature } from '../shared/contracts.ts';
 
 export type IntelligenceColors = Pick<PluginTheme['colors'], 'border' | 'surface0' | 'foreground' | 'accent'>;
-type RecordState = { binding: Binding; doc: EditorView['state']['doc']; changed: number; checked: number; pending: boolean; diagnostics: Diagnostic[] };
+type RecordState = { binding: Binding; doc: EditorView['state']['doc']; changed: number; checked: number; pending: boolean; error?: string; diagnostics: Diagnostic[] };
 
 // Browser highlights style rendered text without adding a second CodeMirror runtime to the host state.
 export class Intelligence {
@@ -16,7 +16,8 @@ export class Intelligence {
   private hoverTimer?: ReturnType<typeof setTimeout>;
   private frame = 0;
   private hoverRequest = 0;
-  private lastError = '';
+  private signatureContext?: { binding: Binding; doc: EditorView['state']['doc']; head: number; changed: number; requested: boolean };
+  private signaturePending = false;
   private workspaces = new Set<string>();
   private timer: ReturnType<typeof setInterval>;
   private observer: MutationObserver;
@@ -37,8 +38,20 @@ export class Intelligence {
     this.tooltip.style.cssText = `display:none;position:fixed;z-index:100000;max-width:min(600px,calc(100vw - 16px));max-height:40vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;padding:8px;border:1px solid ${colors.border};border-radius:4px;background:${colors.surface0};color:${colors.foreground};font:13px/1.5 system-ui;box-shadow:0 2px 10px #0004`;
   }
   private hide() { this.hoverRequest++; clearTimeout(this.hoverTimer); this.tooltip.style.display = 'none'; }
-  private key = () => this.hide();
-  private scroll = () => { this.hide(); this.paint(); };
+  private key = (event: KeyboardEvent) => {
+    this.hide();
+    if (event.ctrlKey && event.shiftKey && event.code === 'Space' && !event.altKey && !event.metaKey) {
+      const binding = nativeEditors(this.hostId).find(item => item.element.contains(event.target as Node));
+      if (binding) {
+        event.preventDefault(); event.stopImmediatePropagation();
+        this.signatureContext = { binding, doc: binding.view.state.doc, head: binding.view.state.selection.main.head, changed: 0, requested: false };
+      }
+    }
+  };
+  private scroll = (event: Event) => {
+    if (event.target !== document && ![...this.records.values()].some(({ binding }) => event.target instanceof Node && (binding.element.contains(event.target) || event.target.contains(binding.element)))) return;
+    this.hide(); this.paint();
+  };
   private mouse = (event: MouseEvent) => {
     if (this.tooltip.contains(event.target as Node)) return;
     this.hide();
@@ -56,7 +69,7 @@ export class Intelligence {
     }, 250);
   };
   private showTooltip(text: string, x: number, y: number) {
-    this.tooltip.textContent = text; this.tooltip.style.display = 'block';
+    this.tooltip.dataset.lspTooltip = ''; this.tooltip.textContent = text; this.tooltip.style.display = 'block';
     this.tooltip.style.left = `${Math.max(8, Math.min(x, innerWidth - this.tooltip.offsetWidth - 8))}px`;
     this.tooltip.style.top = `${Math.max(8, Math.min(y + 18, innerHeight - this.tooltip.offsetHeight - 8))}px`;
   }
@@ -69,9 +82,46 @@ export class Intelligence {
       if (response.hover) this.showTooltip(response.hover, x, y);
     } catch { /* Background mouseovers must not interrupt editing or produce repeated error toasts. */ }
   }
+  private async signature(context: NonNullable<Intelligence['signatureContext']>) {
+    this.signaturePending = true; context.requested = true;
+    const request = ++this.hoverRequest;
+    const { binding, doc, head } = context;
+    const siblings = nativeEditors(this.hostId, binding.pane.workspaceId), docs = siblings.map(item => item.view.state.doc);
+    try {
+      const line = doc.lineAt(head);
+      const response = await this.api.inspect({ kind: 'signature', workspaceId: binding.pane.workspaceId, editorId: this.editorId, path: binding.path, buffers: editorBuffers(binding, siblings), position: { line: line.number - 1, character: head - line.from } });
+      if (this.stopped || request !== this.hoverRequest || !binding.view.hasFocus || doc !== binding.view.state.doc || head !== binding.view.state.selection.main.head || siblings.some((item, index) => item.view.state.doc !== docs[index])) return;
+      const coords = binding.view.coordsAtPos(head);
+      if (response.signature && coords) this.showSignature(response.signature, coords.left, coords.bottom);
+    } catch { /* Unsupported or unavailable signature help must not interrupt typing. */ }
+    finally { this.signaturePending = false; }
+  }
+  private showSignature(signature: Signature, x: number, y: number) {
+    this.showTooltip('', x, y);
+    this.tooltip.dataset.lspTooltip = 'signature';
+    const label = document.createElement('code');
+    if (signature.parameter) {
+      const [start, end] = signature.parameter;
+      const active = document.createElement('strong'); active.textContent = signature.label.slice(start, end); active.dataset.activeParameter = ''; active.style.textDecoration = 'underline';
+      label.append(signature.label.slice(0, start), active, signature.label.slice(end));
+    } else label.textContent = signature.label;
+    this.tooltip.append(label);
+    if (signature.documentation) { const docs = document.createElement('div'); docs.style.marginTop = '6px'; docs.textContent = signature.documentation; this.tooltip.append(docs); }
+    if (signature.count > 1) { const overload = document.createElement('div'); overload.textContent = `Overload ${signature.index + 1} of ${signature.count}`; this.tooltip.append(overload); }
+    this.tooltip.style.left = `${Math.max(8, Math.min(x, innerWidth - this.tooltip.offsetWidth - 8))}px`;
+    this.tooltip.style.top = `${Math.max(8, Math.min(y + 18, innerHeight - this.tooltip.offsetHeight - 8))}px`;
+  }
   private tick() {
     if (this.stopped || document.hidden) return;
     const bindings = nativeEditors(this.hostId);
+    const focused = bindings.find(binding => binding.view.hasFocus);
+    if (focused) {
+      const doc = focused.view.state.doc, head = focused.view.state.selection.main.head;
+      if (this.signatureContext?.binding.view !== focused.view || this.signatureContext.doc !== doc || this.signatureContext.head !== head) {
+        this.hide(); this.signatureContext = { binding: focused, doc, head, changed: Date.now(), requested: false };
+      }
+      if (!this.signatureContext.requested && !this.signaturePending && Date.now() - this.signatureContext.changed >= 250) void this.signature(this.signatureContext);
+    } else if (this.signatureContext) { this.signatureContext = undefined; this.hide(); }
     const views = new Set(bindings.map(binding => binding.view));
     for (const view of this.records.keys()) if (!views.has(view)) this.records.delete(view);
     for (const binding of bindings) {
@@ -95,19 +145,19 @@ export class Intelligence {
       this.workspaces.add(binding.pane.workspaceId);
       const response = await this.api.inspect({ kind: 'diagnostics', workspaceId: binding.pane.workspaceId, editorId: this.editorId, path: binding.path, buffers: editorBuffers(binding, siblings), position: { line: 0, character: 0 } });
       if (this.stopped || doc !== binding.view.state.doc || siblings.some((item, index) => item.view.state.doc !== docs[index])) return;
-      record.diagnostics = response.diagnostics; this.paint(); this.lastError = '';
+      record.diagnostics = response.diagnostics; this.paint(); record.error = '';
     } catch (error) {
       record.diagnostics = []; this.paint();
       const message = error instanceof Error ? error.message : String(error);
-      if (!this.stopped && message !== this.lastError && !/No LSP covers|Missing .paseo\/lsp.json/.test(message)) this.notify(message, true);
-      this.lastError = message;
+      if (!this.stopped && message !== record.error && !/No LSP covers|Missing .paseo\/lsp.json/.test(message)) this.notify(message, true);
+      record.error = message;
     } finally { record.pending = false; }
   }
   private paint() {
     if (this.stopped || !CSS.highlights || typeof Highlight === 'undefined') return;
     const highlights = [new Highlight(), new Highlight(), new Highlight(), new Highlight()];
     for (const { binding, doc, diagnostics } of this.records.values()) {
-      if (!binding.element.isConnected || binding.view.state.doc !== doc || !binding.element.getClientRects().length) continue;
+      if (!diagnostics.length || !binding.element.isConnected || binding.view.state.doc !== doc || !binding.element.getClientRects().length) continue;
       const text = doc.toString();
       for (const diagnostic of diagnostics) {
         try {
