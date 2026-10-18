@@ -4,7 +4,7 @@
 
 Use Paseo’s existing file editor, file browser and native file tabs. The separate replacement editor has been deleted. Lack of a supported plugin API is a maintenance constraint, not evidence that injection is impossible.
 
-The earlier read-only `code-navigation` plugin was uninstalled. Its replacement `editor-tabs` now retains that installation ID for installation continuity, but no longer contributes a workspace panel or owns editing/saving/tabs.
+The earlier read-only and replacement-editor prototypes were removed. The plugin now uses the directory and installation ID `lsp`; it adds a Navigation results panel and leaves editing, saving and file tabs to Paseo.
 
 ## What the live app proved
 
