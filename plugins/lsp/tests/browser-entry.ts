@@ -91,6 +91,20 @@ async function runChecks() {
   historyKey(usage.view, 'ArrowRight');
   await until(() => getHistory(hostId, workspaceId!)?.index === 1 && selected('symbol.py', 'greet'), 'history forward');
   checks.push('Alt+Left/Right restores source caret and destination selection');
+  const side = (view: EditorView, button: number) => view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { button, bubbles: true, cancelable: true }));
+  side(find('symbol.py')!.view, 3);
+  await until(() => getHistory(hostId, workspaceId!)?.index === 0 && usage.view.state.selection.main.head === origin, 'mouse back');
+  side(usage.view, 4);
+  await until(() => getHistory(hostId, workspaceId!)?.index === 1 && selected('symbol.py', 'greet'), 'mouse forward');
+  checks.push('mouse side buttons travel history');
+  if (/Mac|iPhone|iPad/.test(navigator.platform)) {
+    const minus = (view: EditorView, shiftKey: boolean) => view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key: shiftKey ? '_' : '-', code: 'Minus', ctrlKey: true, shiftKey, bubbles: true, cancelable: true }));
+    minus(find('symbol.py')!.view, false);
+    await until(() => getHistory(hostId, workspaceId!)?.index === 0 && usage.view.state.selection.main.head === origin, 'Ctrl+- back');
+    minus(usage.view, true);
+    await until(() => getHistory(hostId, workspaceId!)?.index === 1 && selected('symbol.py', 'greet'), 'Ctrl+Shift+- forward');
+    checks.push('Ctrl+- / Ctrl+Shift+- travel history on macOS');
+  }
 
   const symbol = find('symbol.py')!;
   cursor(symbol.view, 'greet'); key(symbol.view, true);
