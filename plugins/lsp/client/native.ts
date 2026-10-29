@@ -47,6 +47,7 @@ export class NativeNavigation {
   private request = 0;
   private busy = false;
   private pending = new Set<() => void>();
+  private sidePress?: number;
   constructor(private api: EditorApi, readonly hostId: string, private openResults: (workspaceId: string) => void, private notify: (message: string, error?: boolean) => void) {
     document.addEventListener('keydown', this.key, true);
     document.addEventListener('mousedown', this.mouse, true);
@@ -65,7 +66,7 @@ export class NativeNavigation {
   }
   private key = (event: KeyboardEvent) => {
     const step = event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && ['ArrowLeft', 'ArrowRight'].includes(event.key) ? (event.key === 'ArrowLeft' ? -1 : 1)
-      : mac && event.ctrlKey && !event.altKey && !event.metaKey && event.code === 'Minus' ? (event.shiftKey ? 1 : -1) : 0;
+      : mac && event.ctrlKey && !event.altKey && !event.metaKey && ['-', '_'].includes(event.key) ? (event.shiftKey ? 1 : -1) : 0;
     if (step) {
       const binding = this.binding(event); if (!binding || !this.travelBy(binding, step)) return;
       event.preventDefault(); event.stopImmediatePropagation(); return;
@@ -76,7 +77,7 @@ export class NativeNavigation {
   };
   private mouse = (event: MouseEvent) => {
     if (event.button === 3 || event.button === 4) {
-      const binding = this.binding(event); if (!binding) return;
+      const binding = this.binding(event); this.sidePress = binding ? event.button : undefined; if (!binding) return;
       event.preventDefault(); event.stopImmediatePropagation(); this.travelBy(binding, event.button === 3 ? -1 : 1); return;
     }
     if (event.button !== 0 || !(event.metaKey || event.ctrlKey)) return;
@@ -86,7 +87,7 @@ export class NativeNavigation {
     event.preventDefault(); event.stopImmediatePropagation(); void this.navigate(binding, 'definition');
   };
   // Browsers navigate their own history on the side buttons' mouseup unless it is cancelled.
-  private mouseUp = (event: MouseEvent) => { if ((event.button === 3 || event.button === 4) && this.binding(event)) event.preventDefault(); };
+  private mouseUp = (event: MouseEvent) => { if (event.button === this.sidePress) { this.sidePress = undefined; event.preventDefault(); } };
   private async destination(source: Binding, target: Target) {
     if (this.stopped) return;
     const found = new Promise<Binding>((resolve, reject) => {

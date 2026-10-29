@@ -93,6 +93,8 @@ async function runChecks() {
   checks.push('Alt+Left/Right restores source caret and destination selection');
   const side = (view: EditorView, button: number) => view.contentDOM.dispatchEvent(new MouseEvent('mousedown', { button, bubbles: true, cancelable: true }));
   side(find('symbol.py')!.view, 3);
+  const release = () => { const event = new MouseEvent('mouseup', { button: 3, bubbles: true, cancelable: true }); document.body.dispatchEvent(event); return event.defaultPrevented; };
+  assert(release() && !release(), 'Side-button release outside the editor was not cancelled exactly once');
   await until(() => getHistory(hostId, workspaceId!)?.index === 0 && usage.view.state.selection.main.head === origin, 'mouse back');
   side(usage.view, 4);
   await until(() => getHistory(hostId, workspaceId!)?.index === 1 && selected('symbol.py', 'greet'), 'mouse forward');
