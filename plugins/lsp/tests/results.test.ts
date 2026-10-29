@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { clearResults, getResults, setResults, subscribeResults } from '../client/results.ts';
+import { appendHistory, getHistory, setHistory, clearResults, getResults, setResults, subscribeResults } from '../client/results.ts';
 
 test('navigation panels isolate hosts/workspaces, retain results and release subscriptions on cleanup', () => {
   let notifications = 0;
@@ -23,4 +23,24 @@ test('navigation panels isolate hosts/workspaces, retain results and release sub
     clearResults('host-b');
     assert.equal(notifications, 4);
   } finally { unsubscribe(); clearResults('host-a'); clearResults('host-b'); }
+});
+
+
+test('history retains origins, deduplicates adjacent locations and replaces the forward trail', () => {
+  const target = (path: string) => ({ path, range: { start: { line: 2, character: 3 }, end: { line: 2, character: 8 } } });
+  const a = target('a.ts'), b = target('b.ts'), c = target('c.ts'), d = target('d.ts');
+  const open = () => {};
+  let history = appendHistory(undefined, a, b, open);
+  assert.deepEqual(history.targets, [a, b]);
+  history = appendHistory(history, b, c, open);
+  assert.deepEqual(history.targets, [a, b, c]);
+  history = appendHistory({ ...history, index: 0 }, a, d, open);
+  assert.deepEqual(history.targets, [a, d]);
+  assert.equal(history.index, 1);
+  assert.equal(appendHistory(history, d, d, open).targets.length, 2);
+  setHistory('history-host', 'one', history);
+  assert.equal(getHistory('history-host', 'one'), history);
+  assert.equal(getHistory('history-host', 'two'), undefined);
+  clearResults('history-host');
+  assert.equal(getHistory('history-host', 'one'), undefined);
 });

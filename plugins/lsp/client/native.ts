@@ -1,6 +1,6 @@
 import { EditorView } from '@codemirror/view';
 import type { EditorApi, Target } from '../shared/contracts.ts';
-import { setResults, clearResults } from './results.ts';
+import { setResults, clearResults, getHistory, setHistory, appendHistory } from './results.ts';
 
 type Pane = {
   serverId: string; workspaceId: string; target: { kind: string; path?: string };
@@ -56,6 +56,13 @@ export class NativeNavigation {
     return element ? nativeEditors(this.hostId).find(binding => binding.element === element) : undefined;
   }
   private key = (event: KeyboardEvent) => {
+    if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      const binding = this.binding(event); if (!binding) return;
+      const history = getHistory(this.hostId, binding.pane.workspaceId);
+      const index = (history?.index ?? -1) + (event.key === 'ArrowLeft' ? -1 : 1);
+      if (!history || index < 0 || index >= history.targets.length) return;
+      event.preventDefault(); event.stopImmediatePropagation(); history.open(index); return;
+    }
     if (event.key !== 'F12' || event.altKey || event.ctrlKey || event.metaKey) return;
     const binding = this.binding(event); if (!binding) return;
     event.preventDefault(); event.stopImmediatePropagation(); void this.navigate(binding, event.shiftKey ? 'references' : 'definition');
@@ -92,6 +99,42 @@ export class NativeNavigation {
     };
     binding.view.dispatch({ selection: { anchor: offset(target.range.start), head: offset(target.range.end) }, scrollIntoView: true }); binding.view.focus();
   }
+  private async openTarget(source: Binding, target: Target) {
+    if (this.stopped || this.busy) return;
+    this.busy = true;
+    try {
+      const current = nativeEditors(this.hostId, source.pane.workspaceId).find(binding => binding.view.hasFocus)
+        ?? nativeEditors(this.hostId, source.pane.workspaceId).find(binding => binding.element.getClientRects().length > 0) ?? source;
+      await this.jump(current, target);
+    } finally { this.busy = false; }
+  }
+  private location(binding: Binding): Target {
+    const point = (offset: number) => { const line = binding.view.state.doc.lineAt(offset); return { line: line.number - 1, character: offset - line.from }; };
+    const selection = binding.view.state.selection.main;
+    return { path: binding.path, range: { start: point(selection.anchor), end: point(selection.head) } };
+  }
+  private async jump(source: Binding, target: Target) {
+    if (this.stopped) return;
+    const origin = this.location(source);
+    await this.destination(source, target);
+    if (this.stopped) return;
+    const workspaceId = source.pane.workspaceId;
+    setHistory(this.hostId, workspaceId, appendHistory(getHistory(this.hostId, workspaceId), origin, target,
+      index => { void this.travel(source, index); }));
+  }
+  private async travel(source: Binding, index: number) {
+    const workspaceId = source.pane.workspaceId, history = getHistory(this.hostId, workspaceId);
+    if (this.stopped || this.busy || !history || index < 0 || index >= history.targets.length || index === history.index) return;
+    this.busy = true;
+    try {
+      const current = nativeEditors(this.hostId, workspaceId).find(binding => binding.view.hasFocus) ?? source;
+      const targets = [...history.targets];
+      if (current.view.hasFocus) targets[history.index] = this.location(current);
+      await this.destination(current, targets[index]);
+      if (!this.stopped) setHistory(this.hostId, workspaceId, { ...history, targets, index });
+    } catch (error) { if (!this.stopped) this.notify(String(error), true); }
+    finally { this.busy = false; }
+  }
   async navigate(source: Binding, kind: 'definition' | 'references') {
     if (this.stopped || this.busy) return;
     this.busy = true; const request = ++this.request;
@@ -102,7 +145,7 @@ export class NativeNavigation {
       setResults(this.hostId, source.pane.workspaceId, {
         title: `${kind === 'definition' ? 'Definition' : 'Usages'}: ${source.path}:${line.number}`,
         status, targets,
-        open: target => { void this.destination(source, target).catch(error => { publish(String(error)); this.notify(String(error), true); }); },
+        open: target => { void this.openTarget(source, target).catch(error => { publish(String(error)); this.notify(String(error), true); }); },
       });
     };
     try {
@@ -113,7 +156,7 @@ export class NativeNavigation {
       if (this.stopped || request !== this.request) return;
       if (!source.element.isConnected || source.view.state.doc !== state.doc || source.view.state.selection.main.head !== head) { throw new Error('Editor changed during lookup; rerun navigation.'); }
       publish(`${response.targets.length} ${kind === 'definition' ? 'definition' : 'usage'} result(s).${response.omitted ? ` ${response.omitted} external, unavailable or excess targets omitted.` : ''}`, response.targets);
-      if (response.targets.length === 1) await this.destination(source, response.targets[0]);
+      if (response.targets.length === 1) await this.jump(source, response.targets[0]);
       else if (response.targets.length > 1) this.openResults(source.pane.workspaceId);
       else this.notify(`No ${kind === 'definition' ? 'definition' : 'usages'} found.${response.omitted ? ` ${response.omitted} targets outside the workspace or unavailable.` : ''}`);
     } catch (error) { if (!this.stopped && request === this.request) { const message = error instanceof Error ? error.message : String(error); publish(message); this.notify(message, true); } }
