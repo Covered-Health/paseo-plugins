@@ -39,6 +39,7 @@ export function editorBuffers(source: Binding, bindings = nativeEditors(source.p
   buffers.set(source.path, source.view.state.sliceDoc());
   return [...buffers].map(([path, text]) => ({ path, text }));
 }
+const mac = /Mac|iPhone|iPad/.test(navigator.platform);
 export class NativeNavigation {
   private editorId = `native-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   private sessions = new Set<string>();
@@ -46,34 +47,47 @@ export class NativeNavigation {
   private request = 0;
   private busy = false;
   private pending = new Set<() => void>();
+  private sidePress?: number;
   constructor(private api: EditorApi, readonly hostId: string, private openResults: (workspaceId: string) => void, private notify: (message: string, error?: boolean) => void) {
     document.addEventListener('keydown', this.key, true);
     document.addEventListener('mousedown', this.mouse, true);
+    document.addEventListener('mouseup', this.mouseUp, true);
   }
   update(api: EditorApi, notify: (message: string, error?: boolean) => void) { this.api = api; this.notify = notify; }
   private binding(event: Event) {
     const element = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-testid="file-source-editor"]') : null;
     return element ? nativeEditors(this.hostId).find(binding => binding.element === element) : undefined;
   }
+  private travelBy(binding: Binding, step: number) {
+    const history = getHistory(this.hostId, binding.pane.workspaceId);
+    const index = (history?.index ?? -1) + step;
+    if (!history || index < 0 || index >= history.targets.length) return false;
+    history.open(index); return true;
+  }
   private key = (event: KeyboardEvent) => {
-    if (event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
-      const binding = this.binding(event); if (!binding) return;
-      const history = getHistory(this.hostId, binding.pane.workspaceId);
-      const index = (history?.index ?? -1) + (event.key === 'ArrowLeft' ? -1 : 1);
-      if (!history || index < 0 || index >= history.targets.length) return;
-      event.preventDefault(); event.stopImmediatePropagation(); history.open(index); return;
+    const step = event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && ['ArrowLeft', 'ArrowRight'].includes(event.key) ? (event.key === 'ArrowLeft' ? -1 : 1)
+      : mac && event.ctrlKey && !event.altKey && !event.metaKey && ['-', '_'].includes(event.key) ? (event.shiftKey ? 1 : -1) : 0;
+    if (step) {
+      const binding = this.binding(event); if (!binding || !this.travelBy(binding, step)) return;
+      event.preventDefault(); event.stopImmediatePropagation(); return;
     }
     if (event.key !== 'F12' || event.altKey || event.ctrlKey || event.metaKey) return;
     const binding = this.binding(event); if (!binding) return;
     event.preventDefault(); event.stopImmediatePropagation(); void this.navigate(binding, event.shiftKey ? 'references' : 'definition');
   };
   private mouse = (event: MouseEvent) => {
+    if (event.button === 3 || event.button === 4) {
+      const binding = this.binding(event); this.sidePress = binding ? event.button : undefined; if (!binding) return;
+      event.preventDefault(); event.stopImmediatePropagation(); this.travelBy(binding, event.button === 3 ? -1 : 1); return;
+    }
     if (event.button !== 0 || !(event.metaKey || event.ctrlKey)) return;
     const binding = this.binding(event); if (!binding) return;
     const offset = binding.view.posAtCoords({ x: event.clientX, y: event.clientY }); if (offset === null) return;
     binding.view.dispatch({ selection: { anchor: offset } });
     event.preventDefault(); event.stopImmediatePropagation(); void this.navigate(binding, 'definition');
   };
+  // Browsers navigate their own history on the side buttons' mouseup unless it is cancelled.
+  private mouseUp = (event: MouseEvent) => { if (event.button === this.sidePress) { this.sidePress = undefined; event.preventDefault(); } };
   private async destination(source: Binding, target: Target) {
     if (this.stopped) return;
     const found = new Promise<Binding>((resolve, reject) => {
@@ -164,7 +178,7 @@ export class NativeNavigation {
   }
   async dispose() {
     this.stopped = true; this.request++; for (const cancel of [...this.pending]) cancel();
-    document.removeEventListener('keydown', this.key, true); document.removeEventListener('mousedown', this.mouse, true);
+    document.removeEventListener('keydown', this.key, true); document.removeEventListener('mousedown', this.mouse, true); document.removeEventListener('mouseup', this.mouseUp, true);
     clearResults(this.hostId);
     await Promise.all([...this.sessions].map(workspaceId => this.api.release({ workspaceId, editorId: this.editorId }).catch(() => {})));
   }
