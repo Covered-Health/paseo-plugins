@@ -4,7 +4,7 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { NativeNavigation, nativeEditors } from '../client/native.ts';
 import { Intelligence } from '../client/intelligence.ts';
-import { getResults, subscribeResults } from '../client/results.ts';
+import { getResults, getHistory, subscribeResults } from '../client/results.ts';
 import type { EditorApi } from '../shared/contracts.ts';
 
 const workspaceId = new URL(location.href).searchParams.get('workspaceId');
@@ -82,6 +82,16 @@ async function runChecks() {
   await until(() => selected('symbol.py', 'greet'), 'native destination tab and selection');
   assert(opened.includes(base + 'symbol.py'), 'Did not use native openFileInWorkspace callback');
   checks.push('Python F12 opens a native tab and selects the symbol');
+  const historyKey = (view: EditorView, key: string) => view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key, altKey: true, bubbles: true, cancelable: true }));
+  const origin = usage.view.state.selection.main.head;
+  assert(getHistory(hostId, workspaceId!)?.targets.length === 2, 'Missing origin/destination history');
+  historyKey(find('symbol.py')!.view, 'ArrowLeft');
+  await until(() => getHistory(hostId, workspaceId!)?.index === 0, 'history back');
+  assert(usage.view.state.selection.main.head === origin, 'Back lost source caret');
+  historyKey(usage.view, 'ArrowRight');
+  await until(() => getHistory(hostId, workspaceId!)?.index === 1 && selected('symbol.py', 'greet'), 'history forward');
+  checks.push('Alt+Left/Right restores source caret and destination selection');
+
   const symbol = find('symbol.py')!;
   cursor(symbol.view, 'greet'); key(symbol.view, true);
   await until(() => status().includes('2 usage'), 'native Python usages');
