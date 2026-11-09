@@ -1,4 +1,4 @@
-import { EditorView } from '@codemirror/view';
+import type { EditorView } from '@codemirror/view';
 import type { EditorApi, Target } from '../shared/contracts.ts';
 import { setResults, clearResults, getHistory, setHistory, appendHistory } from './results.ts';
 
@@ -24,7 +24,9 @@ export function nativeEditors(hostId: string, workspaceId?: string): Binding[] {
   for (const element of document.querySelectorAll<HTMLElement>('[data-testid="file-source-editor"]')) {
     const pane = nativePane(element);
     if (!pane || pane.serverId !== hostId || (workspaceId && pane.workspaceId !== workspaceId) || pane.target.kind !== 'file' || !pane.target.path) continue;
-    const view = EditorView.findFromDOM(element);
+    // shortcut: CodeMirror stores its view on a private DOM tile; update if that layout changes.
+    const content = element.querySelector('.cm-content') as (HTMLElement & { cmTile?: { root?: { view?: EditorView } } }) | null;
+    const view = content?.cmTile?.root?.view;
     if (view && !view.state.readOnly) bindings.push({ element, pane, view, path: pane.target.path });
   }
   return bindings;
