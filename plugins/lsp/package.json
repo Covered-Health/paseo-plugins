@@ -1,7 +1,7 @@
 {
   "name": "lsp",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "files": [
     "paseo-plugin.json",
@@ -11,16 +11,17 @@
     "index.server.ts",
     "client/",
     "server/",
-    "shared/"
+    "shared/",
+    "scripts/"
   ],
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --test tests/*.test.ts",
-    "browser-harness": "node tests/harness.ts"
+    "browser-harness": "node tests/harness.ts",
+    "postinstall": "node scripts/completion-source.cjs"
   },
   "dependencies": {
-    "@codemirror/state": "6.7.1",
-    "@codemirror/view": "6.43.6",
+    "@codemirror/autocomplete": "^6.20.3",
     "@lezer/highlight": "1.2.5",
     "@lezer/javascript": "1.5.6",
     "@lezer/python": "1.1.19",
@@ -39,6 +40,8 @@
     "react-native": "0.81.5",
     "typescript": "^5.9.3",
     "typescript-language-server": "5.3.0",
-    "zod": "^4.4.3"
+    "zod": "^4.4.3",
+    "@codemirror/state": "6.7.1",
+    "@codemirror/view": "6.43.6"
   }
 }
