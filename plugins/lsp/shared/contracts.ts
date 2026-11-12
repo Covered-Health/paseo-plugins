@@ -22,7 +22,10 @@ export type Inspection = z.output<typeof inspection>;
 export const inspect = defineRpc({ name: 'editor.inspect', input: file.extend({ kind: z.enum(['diagnostics', 'hover', 'signature', 'completion']).default('diagnostics'), editorId: z.string().min(1).max(100), position: point, buffers: z.array(buffer).min(1).max(30) }), output: inspection });
 export const lookup = defineRpc({ name: 'editor.lookup', input: file.extend({ editorId: z.string().min(1).max(100), kind: z.enum(['definition', 'references']), position: point, buffers: z.array(buffer).min(1).max(30) }), output: z.object({ targets: z.array(target), omitted: z.number().int().min(0) }) });
 export const release = defineRpc({ name: 'editor.release', input: workspace.extend({ editorId: z.string().min(1).max(100) }), output: z.object({}) });
+export const rename = defineRpc({ name: 'editor.rename', input: file.extend({ editorId: z.string().min(1).max(100), position: point, buffers: z.array(buffer).min(1).max(30), newName: z.string().min(1).max(8000).optional() }), output: z.object({ placeholder: z.string().optional(), files: z.array(z.object({ path, text: z.string(), edits: z.array(z.object({ range, newText: z.string() })) })).max(30) }) });
+export type RenameResult = RpcOutput<typeof rename>;
 export type EditorApi = {
+  rename(input: RpcInput<typeof rename>): Promise<RenameResult>;
   inspect(input: RpcInput<typeof inspect>): Promise<Inspection>;
   lookup(input: RpcInput<typeof lookup>): Promise<RpcOutput<typeof lookup>>;
   release(input: RpcInput<typeof release>): Promise<RpcOutput<typeof release>>;
