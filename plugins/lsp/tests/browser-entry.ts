@@ -4,6 +4,7 @@ import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { NativeNavigation, nativeEditors } from '../client/native.ts';
 import { Intelligence } from '../client/intelligence.ts';
+import { renameReview } from '../client/rename.ts';
 import { getResults, getHistory, subscribeResults } from '../client/results.ts';
 import type { EditorApi } from '../shared/contracts.ts';
 
@@ -16,6 +17,7 @@ const openedPanels: string[] = [];
 const notices: { message: string; error?: boolean }[] = [];
 let inspectOverride: EditorApi['inspect'] | undefined;
 const api: EditorApi = {
+  rename: input => call('rename', input),
   inspect: input => inspectOverride ? inspectOverride(input) : call('inspect', input),
   lookup: input => {
     const response = nextResponse; nextResponse = undefined;
@@ -252,4 +254,18 @@ async function diagnosticsChecks() {
     await intelligence.dispose(); binding.view.dispatch({ changes: { from: 0, to: binding.view.state.doc.length, insert: original } });
   }
 }
-Object.assign(window, { proof: { runChecks, diagnosticsChecks, hoverChecks, signatureChecks, dispose: async () => { await adapter.dispose(); root.unmount(); } } });
+async function renameReviewChecks() {
+  const file = (path: string) => ({ path, text: 'old()\n', edits: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 3 } }, newText: 'new' }] });
+  let opened = false;
+  const review = renameReview([file('a.ts'), file('b.ts')], () => { opened = true; });
+  const dialog = document.querySelector<HTMLDialogElement>('dialog[aria-label="Review rename changes"]')!;
+  if (!dialog.textContent?.includes('a.ts') || !dialog.textContent.includes('b.ts') || !dialog.textContent.includes('old()') || !dialog.textContent.includes('new()')) throw new Error('Missing rename diffs');
+  const buttons = [...dialog.querySelectorAll('button')]; buttons[0].click();
+  if (!opened || !dialog.open || dialog.matches(':modal')) throw new Error('Diff tab action did not preserve the review');
+  buttons[2].click(); if (await review.result) throw new Error('Cancel confirmed rename');
+  const next = renameReview([file('a.ts'), file('b.ts')], () => {});
+  document.querySelectorAll<HTMLButtonElement>('dialog[aria-label="Review rename changes"] button')[1].click();
+  if (!await next.result || document.querySelector('dialog[aria-label="Review rename changes"]')) throw new Error('Confirm did not finish review');
+  return ['all proposed file diffs shown', 'diff tab action retains review', 'cancel and confirm resolve correctly'];
+}
+Object.assign(window, { proof: { runChecks, diagnosticsChecks, hoverChecks, signatureChecks, renameReviewChecks, dispose: async () => { await adapter.dispose(); root.unmount(); } } });
