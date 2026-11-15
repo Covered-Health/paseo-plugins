@@ -217,25 +217,28 @@ export class NativeNavigation {
     this.busy = true; const request = ++this.request;
     const state = source.view.state;
     const head = state.selection.main.head, line = state.doc.lineAt(head);
+    const word = state.wordAt(head);
+    const symbol = word ? state.sliceDoc(word.from, word.to) : '';
     const publish = (status: string, targets: Target[] = []) => {
       if (this.stopped || request !== this.request) return;
       setResults(this.hostId, source.pane.workspaceId, {
-        title: `${kind === 'definition' ? 'Definition' : 'Usages'}: ${source.path}:${line.number}`,
+        title: `${kind === 'definition' ? 'Definitions' : 'References'}${symbol ? ` for “${symbol}”` : ''}`,
+        source: `${source.path}:${line.number}:${head - line.from + 1}`,
         status, targets,
         open: target => { void this.openTarget(source, target).catch(error => { publish(String(error)); this.notify(String(error), true); }); },
       });
     };
     try {
-      publish(`Finding ${kind === 'definition' ? 'definition' : 'usages'}…`);
+      publish(`Finding ${kind === 'definition' ? 'definition' : 'references'}…`);
       const buffers = editorBuffers(source);
       this.sessions.add(source.pane.workspaceId);
       const response = await this.api.lookup({ workspaceId: source.pane.workspaceId, editorId: this.editorId, path: source.path, buffers, position: { line: line.number - 1, character: head - line.from }, kind });
       if (this.stopped || request !== this.request) return;
       if (!source.element.isConnected || source.view.state.doc !== state.doc || source.view.state.selection.main.head !== head) { throw new Error('Editor changed during lookup; rerun navigation.'); }
-      publish(`${response.targets.length} ${kind === 'definition' ? 'definition' : 'usage'} result(s).${response.omitted ? ` ${response.omitted} external, unavailable or excess targets omitted.` : ''}`, response.targets);
+      publish(`${response.targets.length} ${kind === 'definition' ? 'definition' : 'reference'} result(s).${response.omitted ? ` ${response.omitted} external, unavailable or excess targets omitted.` : ''}`, response.targets);
       if (response.targets.length === 1) await this.jump(source, response.targets[0]);
       else if (response.targets.length > 1) this.openResults(source.pane.workspaceId);
-      else this.notify(`No ${kind === 'definition' ? 'definition' : 'usages'} found.${response.omitted ? ` ${response.omitted} targets outside the workspace or unavailable.` : ''}`);
+      else this.notify(`No ${kind === 'definition' ? 'definition' : 'references'} found.${response.omitted ? ` ${response.omitted} targets outside the workspace or unavailable.` : ''}`);
     } catch (error) { if (!this.stopped && request === this.request) { const message = error instanceof Error ? error.message : String(error); publish(message); this.notify(message, true); } }
     finally { this.busy = false; }
   }
