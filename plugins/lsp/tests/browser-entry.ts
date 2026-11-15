@@ -1,11 +1,12 @@
-import { createElement, createContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { createElement, createContext, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { EditorState } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import { NativeNavigation, nativeEditors } from '../client/native.ts';
 import { Intelligence } from '../client/intelligence.ts';
+import { ResultsPanel } from '../client/results-panel.tsx';
 import { renameReview } from '../client/rename.ts';
-import { getResults, getHistory, subscribeResults } from '../client/results.ts';
+import { getResults, getHistory } from '../client/results.ts';
 import type { EditorApi } from '../shared/contracts.ts';
 
 const workspaceId = new URL(location.href).searchParams.get('workspaceId');
@@ -58,13 +59,14 @@ function NativeHost() {
       createElement('section', { style: { display: path === active ? 'block' : 'none' } }, createElement(HostEditor, { path, line })))),
   );
 }
-// Native-shaped host plus a DOM results consumer; production renders ResultsPanel through Paseo.
+// Render the production panel so browser checks cover its layout and history controls.
 function Results() {
-  const result = useSyncExternalStore(subscribeResults, () => getResults(hostId, workspaceId!));
-  return createElement('aside', { 'data-navigation-results': '', 'aria-label': 'Navigation', style: { width: '320px' } },
-    createElement('h2', null, 'Navigation'),
-    createElement('div', { role: 'status' }, result?.status ?? 'No navigation yet'),
-    result?.targets.map((target, index) => createElement('button', { key: index, onClick: () => result.open(target) }, `${target.path}:${target.range.start.line + 1}:${target.range.start.character + 1}`)));
+  return createElement('aside', { 'data-navigation-results': '', 'aria-label': 'Navigation', style: { display: 'flex', width: '320px', height: '650px' } },
+    createElement(ResultsPanel, {
+      host: { id: hostId }, workspaceId,
+      theme: { colors: { surface0: '#18181b', surface1: '#27272a', surface2: '#3f3f46', foreground: '#fafafa', foregroundMuted: '#a1a1aa', border: '#52525b' } },
+      layout: { compact: false },
+    } as unknown as Parameters<typeof ResultsPanel>[0]));
 }
 const root = createRoot(document.getElementById('root')!);
 root.render(createElement('div', { style: { display: 'flex' } }, createElement('main', { style: { flex: 1 } }, createElement(NativeHost)), createElement(Results)));
@@ -73,7 +75,7 @@ async function runChecks() {
   const assert = (value: unknown, detail: string) => { if (!value) throw new Error(detail); };
   const until = async (check: () => boolean, detail: string) => { const deadline = Date.now() + 15_000; while (!check()) { if (Date.now() > deadline) throw new Error(`Timed out: ${detail}`); await new Promise(resolve => setTimeout(resolve, 25)); } };
   const find = (suffix: string) => nativeEditors(hostId).find(binding => binding.path.endsWith(suffix));
-  const status = () => document.querySelector('[data-navigation-results] [role=status]')?.textContent ?? '';
+  const status = () => document.querySelector('[data-navigation-results] [aria-live=polite]')?.textContent ?? '';
   const key = (view: EditorView, shift = false) => { const event = new KeyboardEvent('keydown', { key: 'F12', code: 'F12', keyCode: 123, shiftKey: shift, bubbles: true, cancelable: true }); view.contentDOM.dispatchEvent(event); return event.defaultPrevented; };
   const cursor = (view: EditorView, name: string) => { const offset = view.state.doc.toString().lastIndexOf(name); view.dispatch({ selection: { anchor: offset + 1 } }); view.focus(); };
   const selected = (suffix: string, word: string) => { const binding = find(suffix); return !!binding && binding.view.state.sliceDoc(binding.view.state.selection.main.from, binding.view.state.selection.main.to) === word; };
@@ -83,6 +85,7 @@ async function runChecks() {
   cursor(usage.view, 'greet'); assert(key(usage.view), 'Native F12 not handled');
   await until(() => selected('symbol.py', 'greet'), 'native destination tab and selection');
   assert(opened.includes(base + 'symbol.py'), 'Did not use native openFileInWorkspace callback');
+  assert(getResults(hostId, workspaceId!)?.title.includes('“greet”'), 'Missing queried symbol');
   checks.push('Python F12 opens a native tab and selects the symbol');
   const historyKey = (view: EditorView, key: string) => view.contentDOM.dispatchEvent(new KeyboardEvent('keydown', { key, altKey: true, bubbles: true, cancelable: true }));
   const origin = usage.view.state.selection.main.head;
@@ -112,10 +115,14 @@ async function runChecks() {
 
   const symbol = find('symbol.py')!;
   cursor(symbol.view, 'greet'); key(symbol.view, true);
-  await until(() => status().includes('2 usage'), 'native Python usages');
-  const result = [...document.querySelectorAll<HTMLButtonElement>('[data-navigation-results] button')].find(button => button.textContent?.endsWith('usage.py:2:11'))!;
-  assert(result, 'Missing usage result'); result.click();
+  await until(() => status().includes('2 reference'), 'native Python usages');
+  const result = [...document.querySelectorAll<HTMLButtonElement>('[data-navigation-results] [role=button][aria-label*=column]')].find(button => button.getAttribute('aria-label')?.endsWith('usage.py, line 2, column 11'))!;
+  assert(result, 'Missing usage result');
+  const resultTop = result.getBoundingClientRect().top;
+  result.click();
   await until(() => selected('usage.py', 'greet'), 'usage result native tab');
+  assert(result.getBoundingClientRect().top === resultTop, 'Clicking a result moved the result list');
+  assert(getResults(hostId, workspaceId!)?.title === 'References for “greet”', 'Missing reference query heading');
   checks.push('Shift+F12 and usage result use native tabs');
   const change = (view: EditorView, text: string) => view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
   const symbolText = symbol.view.state.sliceDoc(), usageText = usage.view.state.sliceDoc();
@@ -142,12 +149,12 @@ async function runChecks() {
   checks.push('only multiple results select the navigation panel');
   nextResponse = { targets: [], omitted: 0 };
   cursor(symbol.view, 'greet'); key(symbol.view, true);
-  await until(() => status().includes('0 usage'), 'empty results in panel');
+  await until(() => status().includes('0 reference'), 'empty results in panel');
   nextResponse = new Error('Config probe error'); key(symbol.view, true);
   await until(() => status().includes('Config probe error'), 'errors in panel');
-  assert(!document.querySelector('[data-navigation-results] button'), 'Old results survived a failed lookup');
+  assert(!document.querySelector('[data-navigation-results] [role=button][aria-label*=column]'), 'Old results survived a failed lookup');
   assert(openedPanels.length === 1, 'Empty results or errors selected navigation panel');
-  assert(notices.at(-2)?.message.includes('No usages') && notices.at(-1)?.error, 'Missing empty/error butter bars');
+  assert(notices.at(-2)?.message.includes('No references') && notices.at(-1)?.error, 'Missing empty/error butter bars');
   checks.push('empty results and errors show notices without selecting the panel');
   nextResponse = { targets: [{ path: symbol.path, range: { start: { line: 0, character: 4 }, end: { line: 0, character: 9 } } }], omitted: 0 };
   cursor(usage.view, 'greet'); key(usage.view, true);
