@@ -248,6 +248,9 @@ export class Languages {
     }
     await Promise.all(closing);
   }
+  async restart(root: string) {
+    await this.reconcile(await realpath(root), []);
+  }
   async release(root: string, editorId: string) {
     root = await realpath(root);
     const closing = [];

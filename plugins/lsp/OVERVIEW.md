@@ -8,6 +8,8 @@ Press **F2** in a native editor to rename a symbol. Enter the new name or cancel
 
 This plugin injects navigation listeners into the native editor using private React pane context. It does not create an editor, file browser, or file-tab system, and it does not save files. Paseo continues to own editing, undo, saving, conflicts, tabs and file opening. The plugin directory and installation ID are `lsp`.
 
+To restart the current workspace’s language servers, open the Command Center (Cmd/Ctrl+K) and choose **Restart LSP servers**. Sessions stop and start fresh on the next editor request, using the current config and unsaved buffers. Other workspaces are unaffected.
+
 Configure each workspace in **`.paseo/lsp.json`**; there is no plugin settings screen or host-wide fallback. This checkout's file contains TypeScript and basedpyright profiles copied from its previous settings. Other workspaces need their own file:
 
 ```json
