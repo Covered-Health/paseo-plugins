@@ -91,3 +91,5 @@ The local HTTP harness is not shipped, validates its HTTP origin/workspace, and 
 - https://docs.basedpyright.com/latest/installation/command-line-and-language-server/
 - https://docs.astral.sh/ty/editors/
 - https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/
+
+The canvas working-diff adapter reads the native model and horizontal offsets from React hook refs. It maps pointer coordinates through rows, columns and measured graphemes to UTF-16 positions, accepting only new-side cells. Hover and signature help use a separate inspection session; navigation uses native file opening and the existing results panel. Requests include the displayed source line, never partial hunk overlays. The server hydrates the full active file within the existing workspace/size boundaries and rejects mismatched lines, preferring mounted unsaved buffers. Model or buffer changes invalidate pending results. This line check does not establish that the entire diff matches the workspace. Private model/ref shapes may require updates after Paseo changes.

@@ -71,8 +71,7 @@ export class NativeNavigation {
     history.open(index); return true;
   }
   private key = (event: KeyboardEvent) => {
-    const step = event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey && ['ArrowLeft', 'ArrowRight'].includes(event.key) ? (event.key === 'ArrowLeft' ? -1 : 1)
-      : mac && event.ctrlKey && !event.altKey && !event.metaKey && ['-', '_'].includes(event.key) ? (event.shiftKey ? 1 : -1) : 0;
+    const step = mac && event.ctrlKey && !event.altKey && !event.metaKey && ['-', '_'].includes(event.key) ? (event.shiftKey ? 1 : -1) : 0;
     if (step) {
       const binding = this.binding(event); if (!binding || !this.travelBy(binding, step)) return;
       event.preventDefault(); event.stopImmediatePropagation(); return;
