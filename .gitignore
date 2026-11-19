@@ -2,3 +2,5 @@ node_modules/
 .DS_Store
 
 plugins/lsp/client/completion-source.js
+plugins/next-edit/client/ai-source.js
+__pycache__/

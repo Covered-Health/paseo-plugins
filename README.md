@@ -72,3 +72,7 @@ npm run browser-harness -- <workspace-id-for-this-checkout>
 ```
 
 The host tests launch real TypeScript and basedpyright servers. At the printed harness URL, run `await window.proof.runChecks()` for navigation, then `await window.proof.diagnosticsChecks()`, `await window.proof.hoverChecks()` and `await window.proof.signatureChecks()` for editor intelligence. These use React-owned file panes and live daemon RPCs; signature checks simulate the document-focus gate because the automated webview runs in the background. Stop the harness afterwards; the installed plugin uses only Paseo's own connection.
+
+## Next edit prediction
+
+`plugins/next-edit` is an independent, opt-in desktop/web editor plugin, compatible with the LSP plugin. It previews exact next-edit predictions and accepts them with Tab while giving LSP completions priority. It includes a single-file FastAPI translation proxy runnable with `uv run --script`, with configurable Zeta 2.1 text-completion URL, model and credentials. See [setup and limits](plugins/next-edit/OVERVIEW.md) and [development and proxy commands](plugins/next-edit/README.md).

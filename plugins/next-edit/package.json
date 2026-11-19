@@ -1,0 +1,39 @@
+{
+  "name": "paseo-next-edit",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "files": [
+    "paseo-plugin.json",
+    "OVERVIEW.md",
+    "index.client.tsx",
+    "index.server.ts",
+    "client/",
+    "shared/",
+    "server/",
+    "scripts/"
+  ],
+  "scripts": {
+    "postinstall": "node scripts/ai-source.cjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "diff": "^8.0.2",
+    "esbuild": "^0.27.0"
+  },
+  "devDependencies": {
+    "@codemirror/state": "6.7.1",
+    "@codemirror/view": "6.43.6",
+    "@getpaseo/client": "0.11.2",
+    "@getpaseo/plugin": "0.11.2",
+    "@types/jsdom": "^30.0.0",
+    "@types/node": "^26.6.4",
+    "@types/react": "~19.2.0",
+    "jsdom": "^31.0.1",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "typescript": "^5.9.3",
+    "zod": "^4.4.3"
+  }
+}
