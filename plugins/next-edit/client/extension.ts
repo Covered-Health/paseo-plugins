@@ -55,25 +55,47 @@ export function nextEditPrediction(options: { fetchFn(state: EditorState): Promi
     timer?: ReturnType<typeof setTimeout>;
     generation = 0;
     destroyed = false;
+    indicator = document.createElement('span');
+    animation?: Animation;
+    constructor(view: EditorView) {
+      this.indicator.className = 'paseo-next-edit-loading';
+      this.indicator.setAttribute('role', 'status');
+      this.indicator.setAttribute('aria-label', 'Predicting next edit');
+      this.indicator.title = 'Predicting next edit…';
+      this.indicator.style.cssText = 'position:absolute;right:8px;bottom:8px;width:12px;height:12px;border:2px solid currentColor;border-right-color:transparent;border-radius:50%;opacity:.45;pointer-events:none;z-index:5';
+      this.indicator.hidden = true;
+      view.dom.append(this.indicator);
+    }
+    loading(active: boolean) {
+      this.indicator.hidden = !active;
+      this.animation?.cancel(); this.animation = undefined;
+      if (active && !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+        this.animation = this.indicator.animate?.([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: 900, iterations: Infinity });
+      }
+    }
+    invalidate() { this.generation++; clearTimeout(this.timer); this.loading(false); }
     update(update: import('@codemirror/view').ViewUpdate) {
       if (!update.docChanged && !update.selectionSet && !update.focusChanged) return;
-      const generation = ++this.generation;
-      clearTimeout(this.timer);
+      this.invalidate();
+      const generation = this.generation;
       if (update.docChanged) options.onEdit(update.startState.doc.toString(), update.state.doc.toString());
       if (!update.docChanged || !update.view.hasFocus || update.transactions.some(tr => tr.isUserEvent('input.complete'))) return;
       const state = update.state, view = update.view;
       this.timer = setTimeout(() => {
-        void options.fetchFn(state).then(value => {
+        this.loading(true);
+        void Promise.resolve().then(() => options.fetchFn(state)).then(value => {
           if (!value || this.destroyed || generation !== this.generation || !view.hasFocus || state.doc !== view.state.doc) return;
           if (value.newText === state.doc.toString()) return;
           view.dispatch({ effects: show.of({ ...value, doc: state.doc, head: state.selection.main.head }) });
-        }).catch(() => {});
+        }).catch(() => {}).finally(() => {
+          if (!this.destroyed && generation === this.generation) this.loading(false);
+        });
       }, 500);
     }
-    destroy() { this.destroyed = true; this.generation++; clearTimeout(this.timer); }
+    destroy() { this.destroyed = true; this.invalidate(); this.indicator.remove(); }
   });
   return [field, plugin, EditorView.domEventHandlers({ blur: (_event, view) => { view.dispatch({ effects: show.of(null) }); return false; } }), Prec.high(keymap.of([
     { key: 'Tab', run: view => view.dom.querySelector('.cm-tooltip-autocomplete') ? false : accept(view) },
-    { key: 'Escape', run: view => { const pending = view.plugin(plugin); if (pending) { pending.generation++; clearTimeout(pending.timer); } return reject(view); } },
+    { key: 'Escape', run: view => { const pending = view.plugin(plugin); pending?.invalidate(); return reject(view); } },
   ]))];
 }

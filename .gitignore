@@ -4,3 +4,5 @@ node_modules/
 plugins/lsp/client/completion-source.js
 plugins/next-edit/client/ai-source.js
 __pycache__/
+plugins/next-edit/wasm/.upstream/
+plugins/next-edit/wasm/target/

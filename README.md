@@ -75,4 +75,4 @@ The host tests launch real TypeScript and basedpyright servers. At the printed h
 
 ## Next edit prediction
 
-`plugins/next-edit` is an independent, opt-in desktop/web editor plugin, compatible with the LSP plugin. It previews exact next-edit predictions and accepts them with Tab while giving LSP completions priority. It includes a single-file FastAPI translation proxy runnable with `uv run --script`, with configurable Zeta 2.1 text-completion URL, model and credentials. See [setup and limits](plugins/next-edit/OVERVIEW.md) and [development and proxy commands](plugins/next-edit/README.md).
+`plugins/next-edit` is an independent, opt-in desktop/web editor plugin, compatible with the LSP plugin. It previews exact next-edit predictions and accepts them with Tab while giving LSP completions priority. A bundled Rust/WASM formatter and parser runs inside the plugin host, which calls the configured Zeta 2.1 text-completion endpoint directly. No Python proxy or Docker service is needed. See [setup and limits](plugins/next-edit/OVERVIEW.md) and [development and WASM build instructions](plugins/next-edit/README.md).

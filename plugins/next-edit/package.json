@@ -11,12 +11,17 @@
     "client/",
     "shared/",
     "server/",
-    "scripts/"
+    "scripts/",
+    "wasm/Cargo.toml",
+    "wasm/Cargo.lock",
+    "wasm/src/",
+    "wasm/LICENSE-GPL"
   ],
   "scripts": {
     "postinstall": "node scripts/ai-source.cjs",
     "typecheck": "tsc --noEmit",
-    "test": "node --test tests/*.test.ts"
+    "test": "node --test tests/*.test.ts",
+    "build:wasm": "node scripts/build-wasm.mjs"
   },
   "dependencies": {
     "diff": "^8.0.2",

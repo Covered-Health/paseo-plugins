@@ -16,5 +16,5 @@ test('validates offsets and endpoints, defaults disabled', () => {
   assert.equal(preferences.schema.parse({}).enabled, false);
   assert.equal(request.safeParse({ path: 'a', text: '', cursorOffset: 1, history: [] }).success, false);
   assert.equal(result.safeParse({ newText: '', cursorOffset: 1 }).success, false);
-  assert.equal(preferences.schema.safeParse({ proxyUrl: 'file:///etc/passwd' }).success, false);
+  assert.equal(preferences.schema.safeParse({ modelUrl: 'file:///etc/passwd' }).success, false);
 });

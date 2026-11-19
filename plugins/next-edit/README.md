@@ -1,45 +1,33 @@
 # Next edit prediction development
 
-Independent plugin for native Paseo CodeMirror editors. The LSP plugin is unchanged.
+Independent plugin for native Paseo CodeMirror editors. The LSP plugin is unchanged. [Configuration, data sent and limitations](OVERVIEW.md).
 
 ```sh
 cd plugins/next-edit
 npm ci
 npm run typecheck
 npm test
-uv run --cache-dir /tmp/next-edit-uv-cache --with fastapi --with httpx python -m unittest discover -s tests -p 'test_*.py'
 paseo plugin install /absolute/path/to/plugins/next-edit
 ```
 
-Run the standalone proxy on a platform with compatible Zeta bindings:
+Configure the direct Zeta 2.1 `/v1/completions` URL, model and optional API key in the plugin settings. A working local example is `http://127.0.0.1:8080/v1/completions` with model `slxnxl/zeta-2.1-mlx-4bit`. Python and Docker are no longer used.
+
+The server embeds a 250 KB WASM module compiled from Zed’s `zeta_prompt` crate at revision `f693ad0847e4faacd7d630fc78c54695bb862266`. The small Rust wrapper exposes prompt preparation and response parsing. TypeScript handles HTTP, offset conversion, validated splicing and no-edit detection. The generated `server/zeta-wasm.js` contains the binary and JavaScript bindings, so Paseo’s source bundler needs no external asset loading or platform-specific native extension.
+
+To rebuild the committed WASM artifact:
 
 ```sh
-ZETA_COMPLETIONS_URL=https://your-inference-host/v1/completions \
-ZETA_MODEL=your-zeta-2.1-model \
-ZETA_API_KEY=your-token \
-uv run --script server/proxy.py
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.130 --locked
+npm run build:wasm
 ```
 
-Omit `ZETA_API_KEY` for servers without authentication. No MLX-specific dependency or process launch is used. If the proxy runs on another machine, set its listener as needed and use its address in the plugin’s settings. [Setup, data sent and limitations](OVERVIEW.md).
+The build script downloads five source files from the pinned Zed revision and supplies their standalone Cargo manifest with the upstream workspace dependency versions. `wasm/Cargo.lock` pins resolved dependencies. Downloaded sources and build outputs are ignored; the Rust wrapper, lockfile, build script, GPL license and generated runtime bundle are included in the plugin package. Zeta source: <https://github.com/zed-industries/zed/tree/f693ad0847e4faacd7d630fc78c54695bb862266/crates/zeta_prompt>.
 
-The prediction UI is a small CodeMirror extension bundled as CommonJS with `@codemirror/state` and `@codemirror/view` external. Runtime loading supplies the host’s actual module instances, avoiding duplicate state fields and extension incompatibility. A removable compartment owns each editor’s extension, debounce timer and pending response generation. Source changes require rebuilding the generated `client/ai-source.js` (`npm run postinstall`); installation does this automatically. The generated file is ignored by Git.
+The editor extension is bundled separately as CommonJS with `@codemirror/state` and `@codemirror/view` external. Runtime loading supplies the host’s actual module instances. A removable compartment owns each editor’s extension, debounce timer and pending response generation. Changes to the extension require rebuilding ignored `client/ai-source.js` with `npm run postinstall`; installation does this automatically.
 
-`@marimo-team/codemirror-ai` 0.3.10 was evaluated but its diff acceptance merges separated changes without retaining intervening text and ignores the model cursor for text edits. This implementation instead previews a single exact replacement span, retaining all intervening text, and accepts the returned cursor. It also invalidates pending results on selection movement and disposal. DOM tests cover those cases and the LSP plugin’s existing highest-priority Tab keymap.
+`@marimo-team/codemirror-ai` 0.3.10 was evaluated but its diff acceptance merges separated changes without retaining intervening text and ignores the model cursor for text edits. This implementation previews a single exact replacement span, retains all intervening text, and accepts the returned cursor. It invalidates pending results on selection movement and disposal, and ignores cursor-only predictions.
 
-Python tests use a mocked bindings adapter and mocked HTTP model, verifying request translation and byte-safe splicing. They do not exercise native Rust bindings or a real Zeta model. Upstream contracts: [Zeta bindings](https://pypi.org/project/zed-zeta-bindings/), [CodeMirror AI source](https://github.com/marimo-team/codemirror-ai), [Paseo plugin reference](https://paseo.sh/docs/plugins/reference.md).
+Tests execute the real compiled WASM module and compare prompts, stop tokens and spliced results with fixtures captured from `zed-zeta-bindings` 1.10.2: no-edit, real edit, Unicode/history and cropped-document cases. Additional tests cover the configured HTTP request, truncated completions, malformed Unicode, settings migration, native editor acceptance, stale results and LSP key priority.
 
-On macOS, the published Linux bindings can run in Docker while MLX stays on the Mac:
-
-```sh
-docker run -d --name paseo-next-edit-proxy --platform linux/amd64 \
-  -p 127.0.0.1:8001:8001 \
-  -v "$PWD/server/proxy.py:/app/proxy.py:ro" \
-  -e PREDICTION_HOST=0.0.0.0 \
-  -e ZETA_COMPLETIONS_URL=http://host.docker.internal:8080/v1/completions \
-  -e ZETA_MODEL=slxnxl/zeta-2.1-mlx-4bit \
-  ghcr.io/astral-sh/uv:python3.13-bookworm-slim uv run --script /app/proxy.py
-```
-
-Run this from the plugin directory with Docker Desktop running. Manage the proxy with `docker logs`, `docker stop`, and `docker start paseo-next-edit-proxy`. The bind mount uses this checkout’s proxy file. This route was verified against the local MLX Zeta model through the installed plugin’s daemon RPC.
-
-Live verification on Paseo 0.16.0 used the installed app’s web bundle connected to the real local daemon, with both LSP and prediction enabled. The native sample editor rendered the predicted `b` in `return a + b`; Escape dismissed the LSP completion menu while preserving the prediction, and Tab accepted the exact text with cursor offset 32. The background automation tab’s document-focus gate was simulated. The sample file and temporary UI test servers were removed afterwards.
+Live checks on Paseo 0.16.0 with the local Zeta model verified no-edit cursor preservation and `return x` → `return x * x` through the installed WASM host handler. The earlier live editor check verified inline preview, LSP menu dismissal and Tab acceptance using the installed app’s web bundle; its background document-focus gate was simulated.

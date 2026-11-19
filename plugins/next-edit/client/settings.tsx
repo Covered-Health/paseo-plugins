@@ -12,8 +12,10 @@ function Editor({ settings, theme }: PluginSurfaceProps & { settings: Extract<Se
   const [draft, setDraft] = useState(settings.values);
   return <View style={{ gap: 16 }}>
     <SettingsSwitch label="Enable next edit prediction" value={draft.enabled} onValueChange={enabled => setDraft({ ...draft, enabled })} />
-    <SettingsInput label="Prediction proxy URL (from daemon host)" initialValue={draft.proxyUrl} onChangeText={proxyUrl => setDraft({ ...draft, proxyUrl })} />
-    <Text style={{ color: theme.colors.foregroundMuted }}>When enabled, file text, file path and up to ten recent diffs are sent through this host to your proxy and configured model endpoint. Tab accepts a prediction; Escape dismisses it. Configure the model URL, name and credentials on the proxy host.</Text>
+    <SettingsInput label="Model completions URL (from daemon host)" initialValue={draft.modelUrl} onChangeText={modelUrl => setDraft({ ...draft, modelUrl })} />
+    <SettingsInput label="Model name" initialValue={draft.model} onChangeText={model => setDraft({ ...draft, model })} />
+    <SettingsInput label="API key (optional)" secureTextEntry initialValue={draft.apiKey} onChangeText={apiKey => setDraft({ ...draft, apiKey })} />
+    <Text style={{ color: theme.colors.foregroundMuted }}>When enabled, file text, file path and up to ten recent diffs are sent through this host to your configured model endpoint. Tab accepts a prediction; Escape dismisses it. Use an OpenAI-compatible text completions endpoint serving Zeta 2.1.</Text>
     <SettingsAction label="Save changes" actionLabel="Save" disabled={settings.saving} error={settings.saveError} onPress={() => { void settings.save(draft, settings.revision); }} />
   </View>;
 }

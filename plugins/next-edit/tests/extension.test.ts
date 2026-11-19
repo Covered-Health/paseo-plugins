@@ -68,3 +68,27 @@ test('no-edit responses never render cursor-only predictions or consume Tab', as
     assert.equal(item.view.state.selection.main.head, 1);
   } finally { item.close(); }
 });
+
+test('loading indicator follows only the current request and disappears on failure or removal', async () => {
+  const requests: { resolve(value: null): void; reject(error: Error): void }[] = [];
+  const item = editor(() => new Promise((resolve, reject) => requests.push({ resolve, reject })));
+  const indicator = () => item.view.dom.querySelector<HTMLElement>('.paseo-next-edit-loading');
+  try {
+    item.view.dispatch({ changes: { from: 0, insert: 'a' } });
+    assert.equal(indicator()?.hidden, true);
+    await pause(); assert.equal(indicator()?.hidden, false);
+    assert.equal(indicator()?.getAttribute('role'), 'status');
+    item.view.dispatch({ changes: { from: 0, insert: 'b' } });
+    assert.equal(indicator()?.hidden, true);
+    await pause(); assert.equal(indicator()?.hidden, false);
+    requests[0]!.resolve(null); await pause(10);
+    assert.equal(indicator()?.hidden, false);
+    requests[1]!.reject(new Error('offline')); await pause(10);
+    assert.equal(indicator()?.hidden, true);
+    item.view.dispatch({ changes: { from: 0, insert: 'c' } }); await pause();
+    assert.equal(indicator()?.hidden, false);
+    key(item.view, 'Escape'); assert.equal(indicator()?.hidden, true);
+    requests[2]!.resolve(null); await pause(10);
+  } finally { item.close(); }
+  assert.equal(document.querySelector('.paseo-next-edit-loading'), null);
+});
