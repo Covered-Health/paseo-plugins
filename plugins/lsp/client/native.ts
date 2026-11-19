@@ -7,6 +7,7 @@ import { setResults, clearResults, getHistory, setHistory, appendHistory } from 
 
 type Pane = {
   serverId: string; workspaceId: string; target: { kind: string; path?: string };
+  openTab?(target: Pane['target']): void;
   openFileInWorkspace(input: { location: { path: string; lineStart: number; lineEnd: number }; disposition: 'main' }): void;
 };
 type Fiber = { memoizedProps?: Record<string, unknown>; return?: Fiber | null };
