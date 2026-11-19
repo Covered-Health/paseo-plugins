@@ -66,6 +66,8 @@ def splice(body: Prediction, parsed) -> dict:
     original[:start].decode("utf-8")
     original[:end].decode("utf-8")
     replacement = parsed.new_editable_region.encode("utf-8")
+    if original[start:end] == replacement:
+        return {"newText": body.text, "cursorOffset": body.cursorOffset}
     cursor = parsed.cursor_offset_in_new_editable_region
     if cursor is None:
         old_cursor = utf16_to_byte(body.text, body.cursorOffset)

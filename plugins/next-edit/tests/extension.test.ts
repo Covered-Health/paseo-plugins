@@ -41,7 +41,7 @@ test('selection movement and destruction discard pending responses', async () =>
   const item = editor(() => new Promise(done => { resolve = done; }));
   item.view.dispatch({ changes: { from: 0, insert: '!' } }); await pause();
   item.view.dispatch({ selection: { anchor: 2 } }); resolve({ newText: 'stale', cursorOffset: 0 }); await pause(10);
-  assert.equal(item.view.dom.querySelector('.paseo-next-edit'), null);
+  assert.equal(!!item.view.dom.querySelector('.paseo-next-edit'), false);
   item.close();
   const destroyed = editor(() => new Promise(done => { resolve = done; }));
   destroyed.view.dispatch({ changes: { from: 0, insert: '!' } }); await pause();
@@ -53,6 +53,18 @@ test('Escape cancels debounce and leaves normal Tab available', async () => {
   const item = editor(async () => { calls++; return null; });
   try {
     item.view.dispatch({ changes: { from: 0, insert: '!' } }); key(item.view, 'Escape'); await pause();
-    assert.equal(calls, 0); assert.equal(item.view.dom.querySelector('.paseo-next-edit'), null);
+    assert.equal(calls, 0); assert.equal(!!item.view.dom.querySelector('.paseo-next-edit'), false);
+  } finally { item.close(); }
+});
+
+test('no-edit responses never render cursor-only predictions or consume Tab', async () => {
+  const item = editor(async state => ({ newText: state.doc.toString(), cursorOffset: state.doc.length }));
+  try {
+    item.view.dispatch({ changes: { from: 0, insert: '!' }, selection: { anchor: 1 } }); await pause();
+    assert.equal(!!item.view.dom.querySelector('.paseo-next-edit'), false);
+    const event = new dom.window.KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true });
+    item.view.contentDOM.dispatchEvent(event);
+    assert.equal(event.defaultPrevented, false);
+    assert.equal(item.view.state.selection.main.head, 1);
   } finally { item.close(); }
 });

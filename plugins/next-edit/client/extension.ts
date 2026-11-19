@@ -46,9 +46,8 @@ export function nextEditPrediction(options: { fetchFn(state: EditorState): Promi
     return EditorView.decorations.from(source, value => {
       if (!value) return Decoration.none;
       const span = editSpan(value.doc.toString(), value.newText), decorations = [];
-      if (value.newText === value.doc.toString()) { span.from = value.cursorOffset; span.to = value.cursorOffset; }
       if (span.from < span.to) decorations.push(Decoration.mark({ attributes: { style: 'text-decoration:line-through;background:color-mix(in srgb,#e74c3c 22%,transparent)' } }).range(span.from, span.to));
-      decorations.push(Decoration.widget({ widget: new Preview(span.insert || (value.newText === value.doc.toString() ? 'Move cursor ' : '')), side: 1 }).range(span.from));
+      decorations.push(Decoration.widget({ widget: new Preview(span.insert), side: 1 }).range(span.from));
       return Decoration.set(decorations, true);
     });
   }
@@ -66,7 +65,7 @@ export function nextEditPrediction(options: { fetchFn(state: EditorState): Promi
       this.timer = setTimeout(() => {
         void options.fetchFn(state).then(value => {
           if (!value || this.destroyed || generation !== this.generation || !view.hasFocus || state.doc !== view.state.doc) return;
-          if (value.newText === state.doc.toString() && value.cursorOffset === state.selection.main.head) return;
+          if (value.newText === state.doc.toString()) return;
           view.dispatch({ effects: show.of({ ...value, doc: state.doc, head: state.selection.main.head }) });
         }).catch(() => {});
       }, 500);

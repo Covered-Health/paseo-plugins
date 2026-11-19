@@ -21,6 +21,11 @@ class ProxyTest(unittest.TestCase):
         with self.assertRaises(ValueError): proxy.utf16_to_byte("😀", 1)
         with self.assertRaises(ValueError): proxy.splice(body, SimpleNamespace(range_in_excerpt=(1, 3), new_editable_region="", cursor_offset_in_new_editable_region=None))
 
+    def test_no_edit_keeps_original_cursor(self):
+        body = proxy.Prediction(path="a.py", text="def add(a, b):\n    return a + ", cursorOffset=10)
+        parsed = SimpleNamespace(range_in_excerpt=(0, 30), new_editable_region=body.text, cursor_offset_in_new_editable_region=None)
+        self.assertEqual(proxy.splice(body, parsed), {"newText": body.text, "cursorOffset": 10})
+
     def test_http_translation(self):
         captured = {}
         class Zeta:
