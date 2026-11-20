@@ -48,7 +48,7 @@ export async function predictEdit(input: Input, settings: Preferences) {
   const response = await fetch(settings.modelUrl, {
     method: 'POST', headers: { 'Content-Type': 'application/json', ...(settings.apiKey ? { Authorization: `Bearer ${settings.apiKey}` } : {}) },
     body: JSON.stringify({ prompt: prepared.prompt, max_tokens: 512, temperature: 0, stop: prepared.stop, stream: false, ...(settings.model ? { model: settings.model } : {}) }),
-    signal: AbortSignal.timeout(12_000), redirect: 'error',
+    signal: AbortSignal.timeout(25_000), redirect: 'error',
   });
   if (!response.ok) throw new Error(`Prediction model returned HTTP ${response.status}`);
   const choice = completion.parse(await response.json()).choices[0]!;

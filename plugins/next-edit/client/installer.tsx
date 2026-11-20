@@ -40,13 +40,11 @@ export function Installer({ host }: PluginSidebarItemProps) {
             async fetchFn(editor) {
               const text = editor.doc.toString();
               if (!alive || text.length > 500_000) return null;
-              try {
-                const response = await fetchPrediction({ path: binding.path, text, cursorOffset: editor.selection.main.head, history: [...history] });
-                failed = false; return response;
-              } catch (error) {
-                if (alive && !failed) { failed = true; toast.error(`Next edit prediction: ${String(error)}`); }
-                return null;
-              }
+              const response = await fetchPrediction({ path: binding.path, text, cursorOffset: editor.selection.main.head, history: [...history] });
+              failed = false; return response;
+            },
+            onError(error) {
+              if (alive && !failed) { failed = true; toast.error(`Next edit prediction: ${String(error)}`); }
             },
           });
           view.dispatch({ effects: state.StateEffect.appendConfig.of(compartment.of(extension)) });

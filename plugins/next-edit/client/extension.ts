@@ -3,7 +3,7 @@ import { Decoration, WidgetType, ViewPlugin, keymap, EditorView } from '@codemir
 import { editSpan } from './suggestion.ts';
 type Prediction = { newText: string; cursorOffset: number };
 type Pending = Prediction & { doc: EditorState['doc']; head: number };
-export function nextEditPrediction(options: { fetchFn(state: EditorState): Promise<Prediction | null>; onEdit(oldText: string, newText: string): void }) {
+export function nextEditPrediction(options: { fetchFn(state: EditorState): Promise<Prediction | null>; onEdit(oldText: string, newText: string): void; onError?(error: unknown): void }) {
   const show = StateEffect.define<Pending | null>();
   const field: StateField<Pending | null> = StateField.define<Pending | null>({
     create: () => null,
@@ -55,6 +55,8 @@ export function nextEditPrediction(options: { fetchFn(state: EditorState): Promi
     timer?: ReturnType<typeof setTimeout>;
     generation = 0;
     destroyed = false;
+    inFlight = false;
+    queued?: () => void;
     indicator = document.createElement('span');
     animation?: Animation;
     constructor(view: EditorView) {
@@ -73,7 +75,7 @@ export function nextEditPrediction(options: { fetchFn(state: EditorState): Promi
         this.animation = this.indicator.animate?.([{ transform: 'rotate(0deg)' }, { transform: 'rotate(360deg)' }], { duration: 900, iterations: Infinity });
       }
     }
-    invalidate() { this.generation++; clearTimeout(this.timer); this.loading(false); }
+    invalidate() { this.generation++; clearTimeout(this.timer); this.queued = undefined; this.loading(false); }
     update(update: import('@codemirror/view').ViewUpdate) {
       if (!update.docChanged && !update.selectionSet && !update.focusChanged) return;
       this.invalidate();
@@ -81,16 +83,23 @@ export function nextEditPrediction(options: { fetchFn(state: EditorState): Promi
       if (update.docChanged) options.onEdit(update.startState.doc.toString(), update.state.doc.toString());
       if (!update.docChanged || !update.view.hasFocus || update.transactions.some(tr => tr.isUserEvent('input.complete'))) return;
       const state = update.state, view = update.view;
-      this.timer = setTimeout(() => {
+      const run = () => {
+        if (this.destroyed || generation !== this.generation || !view.hasFocus) return;
+        this.inFlight = true;
         this.loading(true);
         void Promise.resolve().then(() => options.fetchFn(state)).then(value => {
           if (!value || this.destroyed || generation !== this.generation || !view.hasFocus || state.doc !== view.state.doc) return;
           if (value.newText === state.doc.toString()) return;
           view.dispatch({ effects: show.of({ ...value, doc: state.doc, head: state.selection.main.head }) });
-        }).catch(() => {}).finally(() => {
+        }).catch(error => {
+          if (!this.destroyed && generation === this.generation && view.hasFocus) options.onError?.(error);
+        }).finally(() => {
+          this.inFlight = false;
           if (!this.destroyed && generation === this.generation) this.loading(false);
+          const next = this.queued; this.queued = undefined; next?.();
         });
-      }, 500);
+      };
+      this.timer = setTimeout(() => { if (this.inFlight) { this.queued = run; this.loading(true); } else run(); }, 500);
     }
     destroy() { this.destroyed = true; this.invalidate(); this.indicator.remove(); }
   });

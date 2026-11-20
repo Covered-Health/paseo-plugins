@@ -1,6 +1,6 @@
 # Next edit prediction
 
-Suggests edits in Paseo’s existing desktop/web file editor after a 500 ms typing pause. Review the inline insertion and struck-through replacement, then press Tab or click Accept. Escape dismisses the suggestion. Accepted changes stay unsaved and use the editor’s normal undo history. A small spinner at the editor’s lower-right corner appears while a prediction request is pending. Responses that do not change text are ignored. Native mobile editors are not supported.
+Suggests edits in Paseo’s existing desktop/web file editor after a 500 ms typing pause. Review the inline insertion and struck-through replacement, then press Tab or click Accept. Escape dismisses the suggestion. Accepted changes stay unsaved and use the editor’s normal undo history. A small spinner at the editor’s lower-right corner appears while a prediction is pending. Each editor runs one request at a time and keeps only the latest pending edit. Model requests time out after 25 seconds. Responses that do not change text are ignored. Native mobile editors are not supported.
 
 Runs independently of the LSP plugin. Both use the host’s CodeMirror runtime and separate extension compartments; LSP autocomplete takes priority over predictions on Tab. Disabling or removing this plugin removes its extensions without changing LSP behavior.
 

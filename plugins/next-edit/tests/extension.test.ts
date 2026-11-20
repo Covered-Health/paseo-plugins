@@ -10,10 +10,10 @@ globalThis.requestAnimationFrame = dom.window.requestAnimationFrame.bind(dom.win
 globalThis.cancelAnimationFrame = dom.window.cancelAnimationFrame.bind(dom.window);
 const pause = (ms = 600) => new Promise(resolve => setTimeout(resolve, ms));
 function key(view: EditorView, name: string) { view.contentDOM.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })); }
-function editor(fetchFn: Parameters<typeof nextEditPrediction>[0]['fetchFn'], lsp = false) {
+function editor(fetchFn: Parameters<typeof nextEditPrediction>[0]['fetchFn'], lsp = false, onError?: (error: unknown) => void) {
   let accepted = 0;
   const parent = document.createElement('div'); document.body.append(parent);
-  const view = new EditorView({ parent, state: EditorState.create({ doc: 'one keep two', extensions: [nextEditPrediction({ fetchFn, onEdit() {} }), lsp ? Prec.highest(keymap.of([{ key: 'Tab', run: () => { accepted++; return true; } }])) : []] }) });
+  const view = new EditorView({ parent, state: EditorState.create({ doc: 'one keep two', extensions: [nextEditPrediction({ fetchFn, onEdit() {}, onError }), lsp ? Prec.highest(keymap.of([{ key: 'Tab', run: () => { accepted++; return true; } }])) : []] }) });
   // jsdom has no focus/selection layout; exercise the editor's focus gate explicitly.
   Object.defineProperty(view, 'hasFocus', { value: true });
   return { view, accepted: () => accepted, close: () => { view.destroy(); parent.remove(); } };
@@ -69,9 +69,10 @@ test('no-edit responses never render cursor-only predictions or consume Tab', as
   } finally { item.close(); }
 });
 
-test('loading indicator follows only the current request and disappears on failure or removal', async () => {
+test('coalesces pending edits, ignores stale errors, and tracks the active request', async () => {
   const requests: { resolve(value: null): void; reject(error: Error): void }[] = [];
-  const item = editor(() => new Promise((resolve, reject) => requests.push({ resolve, reject })));
+  const errors: unknown[] = [], snapshots: string[] = [];
+  const item = editor(state => { snapshots.push(state.doc.toString()); return new Promise((resolve, reject) => requests.push({ resolve, reject })); }, false, error => errors.push(error));
   const indicator = () => item.view.dom.querySelector<HTMLElement>('.paseo-next-edit-loading');
   try {
     item.view.dispatch({ changes: { from: 0, insert: 'a' } });
@@ -80,10 +81,15 @@ test('loading indicator follows only the current request and disappears on failu
     assert.equal(indicator()?.getAttribute('role'), 'status');
     item.view.dispatch({ changes: { from: 0, insert: 'b' } });
     assert.equal(indicator()?.hidden, true);
-    await pause(); assert.equal(indicator()?.hidden, false);
-    requests[0]!.resolve(null); await pause(10);
+    await pause(); assert.equal(requests.length, 1); assert.equal(indicator()?.hidden, false);
+    item.view.dispatch({ changes: { from: 0, insert: 'c' } }); await pause();
+    assert.equal(requests.length, 1);
+    requests[0]!.reject(new Error('stale timeout')); await pause(10);
+    assert.equal(requests.length, 2); assert.equal(errors.length, 0);
+    assert.equal(snapshots[1], 'cbaone keep two');
     assert.equal(indicator()?.hidden, false);
     requests[1]!.reject(new Error('offline')); await pause(10);
+    assert.equal(errors.length, 1);
     assert.equal(indicator()?.hidden, true);
     item.view.dispatch({ changes: { from: 0, insert: 'c' } }); await pause();
     assert.equal(indicator()?.hidden, false);

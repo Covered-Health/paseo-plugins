@@ -35,3 +35,21 @@ test('old proxy settings migrate to disabled direct model configuration', async 
   const migrated = preferences.schema.parse(await preferences.migrate!({ enabled: true, proxyUrl: 'http://remote.test/predict' }, 1));
   assert.equal(migrated.enabled, false); assert.equal(migrated.modelUrl, 'http://127.0.0.1:8080/v1/completions');
 });
+
+test('allows a model response taking longer than the old 12-second limit', async t => {
+  const fixture = fixtures.find(item => item.name === 'edit')!;
+  const nativeTimeout = AbortSignal.timeout.bind(AbortSignal);
+  // Scale seconds to milliseconds so the real abort signal exercises the deadline quickly.
+  t.mock.method(AbortSignal, 'timeout', (ms: number) => nativeTimeout(ms / 1000));
+  t.mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+    const signal = init!.signal!;
+    const aborted = () => { clearTimeout(timer); reject(signal.reason); };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', aborted);
+      resolve(new Response(JSON.stringify({ choices: [{ text: fixture.output, finish_reason: 'stop' }] })));
+    }, 20);
+    signal.addEventListener('abort', aborted, { once: true });
+    if (signal.aborted) aborted();
+  }));
+  assert.deepEqual(await predictEdit(request.parse(fixture.request), preferences.schema.parse({})), fixture.result);
+});
